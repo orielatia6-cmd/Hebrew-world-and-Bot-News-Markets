@@ -3,6 +3,7 @@ import { db, briefingSettingsTable } from "@workspace/db";
 import { logger } from "../logger";
 import { redactBotToken } from "./secret-safety";
 import { ensureBriefingSettings } from "./store";
+import { SCHEDULE_HEBREW } from "./schedule";
 
 type TelegramApiResponse<T> = {
   ok: boolean;
@@ -91,11 +92,11 @@ function welcomeText(): string {
   return [
     "Briefline מחובר. אשלח לך תדרוכי חדשות חשובים בעברית.",
     "",
-    "מקורות נבדקים כל 15 דקות. ברירת המחדל היא תדרוך כל שעה, ורק סיפורים בחשיבות 4/5 ומעלה נשלחים.",
+    `מקורות נבדקים כל 15 דקות. שמונה תדרוכים ביום: ${SCHEDULE_HEBREW}. אירועים חריגים בדירוג 5/5 נשלחים מיד לאחר זיהוי, גם בלילה.`,
     "",
     "פקודות:",
     "/status — מצב ותדירות",
-    "/interval 15|30|60|120 — תדירות שליחת תדרוכים בדקות",
+    "/schedule — זמני התדרוכים וההתראות",
     "/importance 3|4|5 — רף חשיבות מינימלי",
     "/pause — השהיית עדכונים",
     "/resume — הפעלת עדכונים",
@@ -161,7 +162,7 @@ async function handleOwnerCommand(
     return;
   }
 
-  if (command === "/help") {
+  if (command === "/help" || command === "/schedule" || command === "/interval") {
     await sendHebrew(chatId, welcomeText());
     return;
   }
@@ -173,25 +174,8 @@ async function handleOwnerCommand(
       : "";
     await sendHebrew(
       chatId,
-      `מצב העדכונים: ${state}\nתדירות תדרוך: כל ${settings.deliveryIntervalMinutes} דקות\nרף חשיבות: ${settings.minImportance}/5\nבדיקה אחרונה: ${formatTime(settings.lastCheckedAt)}${settings.lastSentAt ? `\nשליחה אחרונה: ${formatTime(settings.lastSentAt)}` : ""}${problem}`,
+      `מצב העדכונים: ${state}\nתדרוכים: ${SCHEDULE_HEBREW}\nהתראות חריגות: פעילות גם בלילה, לאחר זיהוי בבדיקה של כל 15 דקות\nרף חשיבות: ${settings.minImportance}/5\nבדיקה אחרונה: ${formatTime(settings.lastCheckedAt)}${settings.lastSentAt ? `\nתדרוך אחרון: ${formatTime(settings.lastSentAt)}` : ""}${problem}`,
     );
-    return;
-  }
-
-  if (command === "/interval") {
-    const minutes = Number(argument);
-    if (![15, 30, 60, 120].includes(minutes)) {
-      await sendHebrew(
-        chatId,
-        "בחר תדירות תקינה: /interval 15, /interval 30, /interval 60 או /interval 120.",
-      );
-      return;
-    }
-    await db
-      .update(briefingSettingsTable)
-      .set({ deliveryIntervalMinutes: minutes })
-      .where(eq(briefingSettingsTable.id, 1));
-    await sendHebrew(chatId, `נשמר. תדרוך יישלח כל ${minutes} דקות.`);
     return;
   }
 

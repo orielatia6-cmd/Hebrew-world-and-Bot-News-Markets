@@ -9,6 +9,7 @@ import { redactBotToken } from "./secret-safety";
 import { refreshNews } from "./news";
 import { ensureBriefingSettings } from "./store";
 import { sendTelegramMessage } from "./telegram";
+import { digestSlot, SCHEDULE_HEBREW } from "./schedule";
 
 const SOURCE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const MAX_STORIES_PER_DIGEST = 3;
@@ -60,19 +61,12 @@ function splitStoriesIntoMessages(
   return groups;
 }
 
-async function dispatchPendingStories(force = false): Promise<number> {
+async function dispatchPendingStories(force = false, breaking = false): Promise<number> {
   const settings = await ensureBriefingSettings();
   if (!settings.enabled || !settings.telegramChatId) return 0;
 
-  const now = Date.now();
-  if (
-    !force &&
-    settings.lastSentAt &&
-    now - settings.lastSentAt.getTime() <
-      settings.deliveryIntervalMinutes * 60 * 1000
-  ) {
-    return 0;
-  }
+  const slot = digestSlot(new Date(), settings.lastSentAt);
+  if (!force && !breaking && !slot) return 0;
 
   const pending = await db
     .select()
@@ -80,23 +74,30 @@ async function dispatchPendingStories(force = false): Promise<number> {
     .where(
       and(
         isNull(briefingStoriesTable.deliveredAt),
-        gte(briefingStoriesTable.importance, settings.minImportance),
+        gte(briefingStoriesTable.importance, breaking ? 5 : settings.minImportance),
+        gte(briefingStoriesTable.publishedAt, new Date(Date.now() - (breaking ? 2 : 24) * 60 * 60 * 1000)),
       ),
     )
     .orderBy(desc(briefingStoriesTable.importance), desc(briefingStoriesTable.createdAt))
     .limit(MAX_STORIES_PER_DIGEST);
 
-  if (pending.length === 0) return 0;
+  if (pending.length === 0) {
+    if (!breaking && !force) {
+      await sendTelegramMessage(settings.telegramChatId, "תדרוך חדשות מתוזמן\nאין כרגע ידיעות חדשות שעומדות ברף החשיבות. ידיעות שכבר נשלחו לא יישלחו שוב.");
+      await db.update(briefingSettingsTable).set({ lastSentAt: new Date() }).where(eq(briefingSettingsTable.id, 1));
+    }
+    return 0;
+  }
 
   const messages = splitStoriesIntoMessages(pending);
   for (const group of messages) {
     const body = [
-      "תדרוך חדשות חשוב",
+      breaking ? "התראת חדשות משמעותית" : "תדרוך חדשות חשוב",
       "הסברים לשוק הם אפשריים בלבד ואינם תחזית או ייעוץ השקעות.",
       "",
       ...group.map(storyBlock),
       "",
-      "לשינוי התדירות או רף החשיבות, שלח /interval או /importance לבוט.",
+      `תדרוכים: ${SCHEDULE_HEBREW}\nלהשהיה: /pause`,
     ].join("\n\n");
 
     if (body.length > 3_900) {
@@ -116,7 +117,7 @@ async function dispatchPendingStories(force = false): Promise<number> {
       );
     await db
       .update(briefingSettingsTable)
-      .set({ lastSentAt: deliveredAt, lastError: null })
+      .set({ ...(!breaking && !force ? { lastSentAt: deliveredAt } : {}), lastError: null })
       .where(eq(briefingSettingsTable.id, 1));
   }
 
@@ -161,7 +162,7 @@ async function schedulerTick(): Promise<void> {
 
   try {
     const settings = await ensureBriefingSettings();
-    if (!settings.telegramChatId) return;
+    if (!settings.telegramChatId || !settings.enabled) return;
     const shouldRefresh =
       !settings.lastCheckedAt ||
       Date.now() - settings.lastCheckedAt.getTime() >= SOURCE_CHECK_INTERVAL_MS;
@@ -175,6 +176,7 @@ async function schedulerTick(): Promise<void> {
     }
 
     try {
+      await dispatchPendingStories(false, true);
       await dispatchPendingStories();
     } catch (error) {
       await recordSchedulerError(error);
