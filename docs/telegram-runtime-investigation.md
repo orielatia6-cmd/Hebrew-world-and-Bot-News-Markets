@@ -14,13 +14,26 @@
 
 The local shell process list is not an authoritative inventory of managed workflows, isolated task workspaces, or external hosts. Telegram's webhook information does not identify other long-polling clients. These checks cannot prove that no external copy uses the same token.
 
-No credentials were printed, revoked, or rotated. No webhook, ownership, hosting, delivery schedule, or queued Telegram updates were changed.
+During the initial read-only investigation, no credentials were printed, revoked, or rotated, and no webhook, ownership, hosting, delivery schedule, or queued Telegram updates were changed.
 
-## Still blocked
+## Approved temporary live verification
+
+The owner subsequently requested a temporary development test without publishing, purchasing hosting, changing secrets, collecting news, scheduling digests, or invoking OpenAI.
+
+- An isolated, time-bounded runner was added. It imports neither the application database nor news/AI/scheduler modules.
+- It checks bot identity and rejects production mode, active webhooks, and unavailable workspace-local polling locks. Telegram conflict errors stop the test; no webhook or token is changed.
+- The runner ignores and acknowledges old queued commands and unsupported commands without executing them. This was explained before starting it.
+- Telegram accepted fresh `/start` and `/test` replies. The owner explicitly confirmed receiving both without a login code.
+- Telegram also accepted `/stoptest`. The runner logged `STOPPED`, exited with code 0, and its polling lock was absent afterward.
+- Type checking, server compilation, and mocked tests covering command isolation, lock exclusion, production refusal, webhook refusal, and polling conflicts passed.
+
+See `telegram-development-test.md` for the start/stop instructions. No permanent chat binding or saved delivery settings were written during this session.
+
+## Remaining boundaries
 
 1. The origin of the historical reply remains unconfirmed; the owner does not know its timestamp. Do not repeatedly request the old code or timestamp.
 2. If another fresh obsolete reply appears, investigate other running copies with the owner's assistance; do not stop unrelated services without approval.
 3. An intended published production runtime is not currently available. Publication requires the user's action and approval of any hosting costs.
-4. A fresh Hebrew bot-only `/start` response and `/test` delivery must be verified with the owner on the intended runtime before claiming the runtime mismatch is resolved.
+4. Production startup, scheduled deliveries, and live OpenAI analysis were not verified by this temporary test. The workspace lock cannot exclude unknown hosts using separate filesystems.
 
-This is an investigation snapshot, not evidence of a completed live delivery test.
+The approved temporary Telegram-only delivery test is complete and stopped. This is not a claim that the unpublished production service is active or that the historical sender was conclusively identified.

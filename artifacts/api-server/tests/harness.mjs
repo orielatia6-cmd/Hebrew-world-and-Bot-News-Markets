@@ -122,7 +122,7 @@ export function story(id, importance = 4) {
     id, sourceId: `source-${id}`, title: "כותרת", summary: "סיכום",
     whyItMatters: "חשיבות", marketImpact: "השפעה",
     url: `https://example.test/${id}`, category: "world",
-    importance, tickers: [], deliveredAt: null, createdAt: new Date(),
+    importance, tickers: [], deliveredAt: null, createdAt: new Date(), publishedAt: new Date(),
   };
 }
 

@@ -50,15 +50,14 @@ test("only the first private chat pairs; non-owner commands cannot modify settin
   assert.equal(f.settings.enabled, true);
 });
 
-test("owner commands enforce allowed cadence and importance values", async (t) => {
+test("legacy interval commands cannot change the eight-digest schedule; importance remains adjustable", async (t) => {
   const { f, update } = await telegramFixture(t);
-  for (const minutes of [15, 30, 60, 120]) {
-    await update(101, `/interval ${minutes}`);
-    assert.equal(f.settings.deliveryIntervalMinutes, minutes);
-  }
-  for (const input of ["360", "0", "bad", ""]) {
+  for (const input of ["15", "30", "60", "120", "360", "0", "bad", ""]) {
     await update(101, `/interval ${input}`);
-    assert.equal(f.settings.deliveryIntervalMinutes, 120);
+    assert.equal(f.settings.deliveryIntervalMinutes, 360);
+    for (const hour of ["07:00", "09:00", "11:00", "13:00", "15:00", "17:00", "19:00", "21:00"]) {
+      assert.ok(f.sent.at(-1).text.includes(hour));
+    }
   }
   for (const importance of [3, 4, 5]) {
     await update(101, `/importance ${importance}`);

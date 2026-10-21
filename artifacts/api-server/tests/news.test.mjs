@@ -21,7 +21,7 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
     } } },
     openai: { default: class {
       chat = { completions: { create: async (request) => {
-        const candidates = JSON.parse(request.messages[1].content);
+        const candidates = JSON.parse(request.messages.find((message) => message.role === "user").content);
         requests.push(candidates);
         return { choices: [{ message: { content: JSON.stringify({
           stories: candidates.map((c) => ({

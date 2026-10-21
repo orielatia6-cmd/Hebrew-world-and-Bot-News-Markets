@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startBriefingScheduler } from "./lib/briefing/scheduler";
 import { startTelegramPolling } from "./lib/briefing/telegram";
+import { acquirePollerLock } from "./lib/briefing/poller-lock";
 
 const rawPort = process.env["PORT"];
 
@@ -25,6 +26,12 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
   if (process.env.NODE_ENV === "production") {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) throw new Error("Telegram secret unavailable; bot startup refused.");
+    const release = acquirePollerLock(token);
+    process.once("exit", release);
+    process.once("SIGINT", () => process.exit(0));
+    process.once("SIGTERM", () => process.exit(0));
     startBriefingScheduler();
     startTelegramPolling();
   } else {

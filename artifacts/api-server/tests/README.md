@@ -15,8 +15,14 @@ feed URL deduplication and
 already-analyzed stories, Hebrew analysis validation, importance boundaries,
 delivery cadence, refresh cadence, and successful/failed delivery state.
 
-The six-hour scheduler fixture tests interval arithmetic only: the current
-Telegram commands do not offer 360 minutes or four fixed daily send times.
+Scheduler checks use fixed Israel-time digest slots and include slot boundaries,
+no replay, empty scheduled messages, recent-story limits, and overnight breaking
+alerts that do not consume the next scheduled slot. Legacy interval commands
+must preserve the eight-digest schedule.
+
+The temporary-runner tests mock Telegram and cover restricted commands,
+local lock exclusion, production-mode refusal, active webhook refusal, and
+conflict shutdown. They do not start a live bot or use real credentials.
 
 The current Telegram-only product intentionally has no website login flow.
 One-time-code expiry/session tests from the original task scope are therefore
