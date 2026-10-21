@@ -64,9 +64,9 @@ const feeds: FeedDefinition[] = [
     url: "https://www.theguardian.com/world/rss",
   },
   {
-    name: "הבית הלבן",
+    name: "Google News — הצהרות טראמפ",
     category: "trump",
-    url: "https://www.whitehouse.gov/feed/",
+    url: "https://news.google.com/rss/search?q=%28Trump+statement+OR+Trump+remarks+OR+Trump+says+OR+Truth+Social%29+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
   },
   {
     name: "Google News — טראמפ",
@@ -76,17 +76,12 @@ const feeds: FeedDefinition[] = [
   {
     name: "Google News — שווקים ושבבים",
     category: "markets",
-    url: "https://news.google.com/rss/search?q=%28S%26P+500+OR+Nasdaq+OR+Nvidia+OR+Tesla+OR+AI+OR+semiconductors%29+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+    url: "https://news.google.com/rss/search?q=%28S%26P+500+OR+Nasdaq+OR+Nvidia+OR+Tesla%29+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
   },
   {
-    name: "CNBC Markets",
+    name: "Google News — בינה מלאכותית ושבבים",
     category: "markets",
-    url: "https://www.cnbc.com/id/10000664/device/rss/rss.html",
-  },
-  {
-    name: "CNBC Technology",
-    category: "markets",
-    url: "https://www.cnbc.com/id/19854910/device/rss/rss.html",
+    url: "https://news.google.com/rss/search?q=%28artificial+intelligence+OR+semiconductors+OR+chipmakers+OR+Nvidia+AI%29+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
   },
 ];
 

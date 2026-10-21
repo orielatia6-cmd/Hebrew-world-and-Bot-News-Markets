@@ -24,6 +24,12 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
-  startBriefingScheduler();
-  startTelegramPolling();
+  if (process.env.NODE_ENV === "production") {
+    startBriefingScheduler();
+    startTelegramPolling();
+  } else {
+    logger.info(
+      "Telegram polling and scheduled news delivery are disabled in development to avoid competing with the published bot.",
+    );
+  }
 });
