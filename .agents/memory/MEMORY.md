@@ -1,0 +1,1 @@
+- [Bot operating requirements](bot-operating-requirements.md) — preserve the existing app; four Hebrew briefings daily; explain costs before paid deployment changes.

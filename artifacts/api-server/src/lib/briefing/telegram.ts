@@ -38,7 +38,7 @@ async function telegramCall<T>(
     method: body ? "POST" : "GET",
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(method === "getUpdates" ? 35_000 : 15_000),
+    signal: AbortSignal.timeout(method.split("?")[0] === "getUpdates" ? 35_000 : 15_000),
   });
 
   const payload = (await response.json()) as TelegramApiResponse<T>;

@@ -23,3 +23,4 @@ export async function ensureBriefingSettings(): Promise<DbBriefingSettings> {
 
   return settings;
 }
+
