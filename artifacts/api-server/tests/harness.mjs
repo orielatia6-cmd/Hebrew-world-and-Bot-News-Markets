@@ -48,7 +48,7 @@ export async function load(entry, mocks, exposed = {}) {
 
 export function fixture() {
   const settings = {
-    id: 1, enabled: true, telegramChatId: "101",
+    id: 1, enabled: true, telegramChatId: "101", lastTelegramUpdateId: 0,
     deliveryIntervalMinutes: 360, minImportance: 4,
     lastSentAt: null, lastCheckedAt: new Date(), lastError: null,
   };

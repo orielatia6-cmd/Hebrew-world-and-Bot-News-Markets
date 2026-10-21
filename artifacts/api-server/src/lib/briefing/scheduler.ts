@@ -9,7 +9,7 @@ import { redactBotToken } from "./secret-safety";
 import { refreshNews } from "./news";
 import { ensureBriefingSettings } from "./store";
 import { sendTelegramMessage } from "./telegram";
-import { digestSlot, SCHEDULE_HEBREW } from "./schedule";
+import { digestSlot, scheduleHebrew } from "./schedule";
 
 const SOURCE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const MAX_STORIES_PER_DIGEST = 3;
@@ -97,7 +97,7 @@ async function dispatchPendingStories(force = false, breaking = false): Promise<
       "",
       ...group.map(storyBlock),
       "",
-      `תדרוכים: ${SCHEDULE_HEBREW}\nלהשהיה: /pause`,
+      `תדרוכים: ${scheduleHebrew()}\nלהשהיה: /pause`,
     ].join("\n\n");
 
     if (body.length > 3_900) {
@@ -221,4 +221,12 @@ export function startBriefingScheduler(): void {
     void schedulerTick();
   }, 60_000);
   timer.unref();
+}
+
+/**
+ * Run exactly one scheduler pass for an ephemeral job runner.
+ * The caller owns locking and process shutdown; this function starts no timers.
+ */
+export async function runScheduledJob(): Promise<void> {
+  await schedulerTick();
 }

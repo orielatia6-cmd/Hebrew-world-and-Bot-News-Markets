@@ -15,10 +15,10 @@ feed URL deduplication and
 already-analyzed stories, Hebrew analysis validation, importance boundaries,
 delivery cadence, refresh cadence, and successful/failed delivery state.
 
-Scheduler checks use fixed Israel-time digest slots and include slot boundaries,
+Scheduler checks use four fixed Israel-time digest slots and include slot boundaries,
 no replay, empty scheduled messages, recent-story limits, and overnight breaking
 alerts that do not consume the next scheduled slot. Legacy interval commands
-must preserve the eight-digest schedule.
+must preserve the four-digest schedule.
 
 The temporary-runner tests mock Telegram and cover restricted commands,
 local lock exclusion, production-mode refusal, active webhook refusal, and

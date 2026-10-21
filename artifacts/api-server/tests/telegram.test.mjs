@@ -10,9 +10,10 @@ async function telegramFixture(t) {
   const timeouts = [];
   let refreshes = 0;
   t.mock.method(AbortSignal, "timeout", (ms) => { timeouts.push(ms); return new AbortController().signal; });
+  const telegramUpdates = [];
   t.mock.method(globalThis, "fetch", async (_url, options) => {
     if (options.body) f.sent.push(JSON.parse(options.body));
-    return { ok: true, json: async () => ({ ok: true, result: [] }) };
+    return { ok: true, json: async () => ({ ok: true, result: _url.includes("getUpdates") ? telegramUpdates : [] }) };
   });
   const telegram = await load("lib/briefing/telegram.ts", {
     ...f.mocks,
@@ -24,7 +25,7 @@ async function telegramFixture(t) {
   const update = (id, text, type = "private") => telegram.handleUpdate({
     update_id: 1, message: { text, chat: { id, type } },
   });
-  return { f, telegram, update, timeouts, refreshes: () => refreshes };
+  return { f, telegram, update, timeouts, refreshes: () => refreshes, telegramUpdates };
 }
 
 test("only the first private chat pairs; non-owner commands cannot modify settings", async (t) => {
@@ -50,14 +51,14 @@ test("only the first private chat pairs; non-owner commands cannot modify settin
   assert.equal(f.settings.enabled, true);
 });
 
-test("legacy interval commands cannot change the eight-digest schedule; importance remains adjustable", async (t) => {
+test("legacy interval commands cannot change the four-digest schedule; importance remains adjustable", async (t) => {
   const { f, update } = await telegramFixture(t);
   for (const input of ["15", "30", "60", "120", "360", "0", "bad", ""]) {
     await update(101, `/interval ${input}`);
     assert.equal(f.settings.deliveryIntervalMinutes, 360);
-    for (const hour of ["07:00", "09:00", "11:00", "13:00", "15:00", "17:00", "19:00", "21:00"]) {
-      assert.ok(f.sent.at(-1).text.includes(hour));
-    }
+    const schedule = f.sent.at(-1).text.match(/תדרוכים ביום: ([^\n]+)/)?.[1] ?? "";
+    assert.match(schedule, /שעון ישראל/);
+    assert.equal((schedule.match(/\d{2}:00/g) ?? []).length, 4);
   }
   for (const importance of [3, 4, 5]) {
     await update(101, `/importance ${importance}`);
@@ -65,6 +66,14 @@ test("legacy interval commands cannot change the eight-digest schedule; importan
   }
   await update(101, "/importance 2");
   assert.equal(f.settings.minImportance, 5);
+});
+
+test("one-shot Telegram polling handles and persists each update offset", async (t) => {
+  const { f, telegram, telegramUpdates } = await telegramFixture(t);
+  telegramUpdates.push({ update_id: 812, message: { text: "/test", chat: { id: 101, type: "private" } } });
+  assert.equal(await telegram.pollTelegramUpdatesOnce(), 1);
+  assert.equal(f.settings.lastTelegramUpdateId, 812);
+  assert.ok(f.sent.some((entry) => entry.text.includes("בדיקת החיבור")));
 });
 
 test("manual refresh throttles for five minutes, rejects outsiders, and resets at boundary", async (t) => {

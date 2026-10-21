@@ -1,16 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { digestSlot, similarHeadline } from "./schedule";
+import { digestSlot, israelDigestHours, similarHeadline } from "./schedule";
 
-test("eight slots each Israel day, including summer and winter offsets", () => {
+test("four slots each Israel day, including summer and winter offsets", () => {
   for (const [day, offset] of [["2026-07-01", 3], ["2026-12-01", 2]] as const) {
     let count = 0;
     for (let hour = 0; hour < 24; hour++) {
       const now = new Date(`${day}T${String(hour).padStart(2,"0")}:00:00Z`);
-      if (digestSlot(now, null)) { count++; assert.ok([7,9,11,13,15,17,19,21].includes((hour + offset) % 24)); }
+      if (digestSlot(now, null)) { count++; assert.ok(israelDigestHours(now).includes((hour + offset) % 24)); }
     }
-    assert.equal(count, 8);
+    assert.equal(count, 4);
   }
+});
+test("four fixed UTC workflow triggers map to Israel hours in both DST seasons", () => {
+  assert.deepEqual(israelDigestHours(new Date("2026-07-01T00:00:00Z")), [8, 12, 16, 20]);
+  assert.deepEqual(israelDigestHours(new Date("2026-12-01T00:00:00Z")), [7, 11, 15, 19]);
 });
 test("no replay of completed slots, bounded recovery, no overnight catchup", () => {
   assert.equal(digestSlot(new Date("2026-07-01T04:01:00Z"), new Date("2026-07-01T04:00:00Z")), null);

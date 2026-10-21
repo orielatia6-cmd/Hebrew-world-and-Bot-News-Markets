@@ -1,0 +1,31 @@
+name: Initialize Briefline Neon schema
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type INITIALIZE to create/update the bot tables in the configured Neon database"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  initialize:
+    if: inputs.confirm == 'INITIALIZE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @workspace/db run push

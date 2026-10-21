@@ -3,7 +3,7 @@ import { db, briefingSettingsTable } from "@workspace/db";
 import { logger } from "../logger";
 import { redactBotToken } from "./secret-safety";
 import { ensureBriefingSettings } from "./store";
-import { SCHEDULE_HEBREW } from "./schedule";
+import { scheduleHebrew } from "./schedule";
 
 type TelegramApiResponse<T> = {
   ok: boolean;
@@ -92,7 +92,7 @@ function welcomeText(): string {
   return [
     "Briefline מחובר. אשלח לך תדרוכי חדשות חשובים בעברית.",
     "",
-    `מקורות נבדקים כל 15 דקות. שמונה תדרוכים ביום: ${SCHEDULE_HEBREW}. אירועים חריגים בדירוג 5/5 נשלחים מיד לאחר זיהוי, גם בלילה.`,
+    `מקורות נבדקים בכל עדכון מתוזמן. ארבעה תדרוכים ביום: ${scheduleHebrew()}. ידיעות חריגות נבדקות גם בזמן התדרוכים.`,
     "",
     "פקודות:",
     "/status — מצב ותדירות",
@@ -174,7 +174,7 @@ async function handleOwnerCommand(
       : "";
     await sendHebrew(
       chatId,
-      `מצב העדכונים: ${state}\nתדרוכים: ${SCHEDULE_HEBREW}\nהתראות חריגות: פעילות גם בלילה, לאחר זיהוי בבדיקה של כל 15 דקות\nרף חשיבות: ${settings.minImportance}/5\nבדיקה אחרונה: ${formatTime(settings.lastCheckedAt)}${settings.lastSentAt ? `\nתדרוך אחרון: ${formatTime(settings.lastSentAt)}` : ""}${problem}`,
+      `מצב העדכונים: ${state}\nתדרוכים: ${scheduleHebrew()}\nידיעות חריגות נבדקות בזמן התדרוכים המתוזמנים\nרף חשיבות: ${settings.minImportance}/5\nבדיקה אחרונה: ${formatTime(settings.lastCheckedAt)}${settings.lastSentAt ? `\nתדרוך אחרון: ${formatTime(settings.lastSentAt)}` : ""}${problem}`,
     );
     return;
   }
@@ -266,6 +266,29 @@ async function pollLoop(): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
     }
   }
+}
+
+/**
+ * Read one bounded Telegram update batch for an ephemeral scheduled runner.
+ * Persist each offset only after handling its update so a failed run can retry it.
+ */
+export async function pollTelegramUpdatesOnce(): Promise<number> {
+  const settings = await ensureBriefingSettings();
+  const offset = settings.lastTelegramUpdateId + 1;
+  const params = new URLSearchParams({
+    offset: String(offset),
+    timeout: "0",
+    allowed_updates: JSON.stringify(["message"]),
+  });
+  const updates = await telegramCall<TelegramUpdate[]>(`getUpdates?${params.toString()}`);
+  for (const update of updates) {
+    await handleUpdate(update);
+    await db
+      .update(briefingSettingsTable)
+      .set({ lastTelegramUpdateId: update.update_id })
+      .where(eq(briefingSettingsTable.id, 1));
+  }
+  return updates.length;
 }
 
 export function startTelegramPolling(): void {

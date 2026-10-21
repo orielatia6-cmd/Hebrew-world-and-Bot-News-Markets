@@ -4,7 +4,7 @@ import { fixture, load, story } from "./harness.mjs";
 
 async function schedulerFixture(t) {
   const f = fixture();
-  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-07-01T04:00:00Z") }); // 07:00 Israel
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-07-01T05:00:00Z") }); // 08:00 Israel summer slot
   let refreshes = 0;
   const scheduler = await load("lib/briefing/scheduler.ts", {
     ...f.mocks,
@@ -21,10 +21,10 @@ test("scheduled slot sends at boundary, not before; only recent eligible undeliv
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   f.stories.push(story(1, 3), story(2, 4), story(3, 5), { ...story(4, 5), deliveredAt: new Date() });
   f.stories.push({ ...story(5, 5), publishedAt: new Date("2026-06-28T04:00:00Z") });
-  t.mock.timers.setTime(Date.parse("2026-07-01T03:59:59.999Z"));
+  t.mock.timers.setTime(Date.parse("2026-07-01T04:59:59.999Z"));
   assert.equal(await dispatchPendingStories(), 0);
   assert.equal(f.sent.length, 0);
-  t.mock.timers.setTime(Date.parse("2026-07-01T04:00:00Z"));
+  t.mock.timers.setTime(Date.parse("2026-07-01T05:00:00Z"));
   assert.equal(await dispatchPendingStories(), 2);
   assert.equal(f.sent.length, 1);
   assert.equal(f.stories[0].deliveredAt, null);

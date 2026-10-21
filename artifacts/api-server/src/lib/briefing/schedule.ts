@@ -1,11 +1,25 @@
-export const SCHEDULE_HEBREW = "07:00, 09:00, 11:00, 13:00, 15:00, 17:00, 19:00, 21:00 (שעון ישראל)";
+const UTC_DIGEST_HOURS = [5, 9, 13, 17];
+
+export function israelDigestHours(now: Date): number[] {
+  const offset = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jerusalem",
+    timeZoneName: "shortOffset",
+  }).formatToParts(now).find((part) => part.type === "timeZoneName")?.value.match(/GMT([+-]\d+)/)?.[1];
+  if (!offset) throw new Error("Could not determine Israel's UTC offset.");
+  return UTC_DIGEST_HOURS.map((hour) => (hour + Number(offset) + 24) % 24);
+}
+
+export function scheduleHebrew(now = new Date()): string {
+  return `${israelDigestHours(now).map((hour) => `${String(hour).padStart(2, "0")}:00`).join(", ")} (שעון ישראל)`;
+}
+
 export function digestSlot(now: Date, lastSent: Date | null): Date | null {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Jerusalem", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).formatToParts(now);
   const hour = Number(parts.find(p => p.type === "hour")?.value);
   const minute = Number(parts.find(p => p.type === "minute")?.value);
-  if (![7, 9, 11, 13, 15, 17, 19, 21].includes(hour) || minute >= 15) return null;
+  if (!israelDigestHours(now).includes(hour) || minute >= 15) return null;
   const slot = new Date(now.getTime() - minute * 60000 - now.getSeconds() * 1000 - now.getMilliseconds());
   return lastSent && lastSent >= slot ? null : slot;
 }

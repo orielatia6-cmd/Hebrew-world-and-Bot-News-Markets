@@ -10,6 +10,7 @@ export const briefingSettingsTable = pgTable("briefing_settings", {
   minImportance: integer("min_importance").notNull().default(4),
   telegramChatId: text("telegram_chat_id"),
   botUsername: text("bot_username"),
+  lastTelegramUpdateId: integer("last_telegram_update_id").notNull().default(0),
   loginCodeHash: text("login_code_hash"),
   loginCodeExpiresAt: timestamp("login_code_expires_at", { withTimezone: true }),
   lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
