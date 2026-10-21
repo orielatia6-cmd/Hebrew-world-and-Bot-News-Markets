@@ -3,13 +3,13 @@ name: Bot operating requirements
 description: User's operating goal and deployment approval boundary for the existing Telegram bot.
 ---
 
-Preserve the existing project rather than rebuilding completed features. The user's priority is a continuously running Telegram news bot with four Hebrew news briefings per day.
+Preserve the existing project rather than rebuilding completed features. The user's latest requirement is eight Hebrew news digests per day during waking hours, plus immediate alerts for major breaking news, with duplicate stories avoided.
 
-**Why:** The user explicitly stated this priority when resuming interrupted work.
+**Why:** The user explicitly replaced the earlier frequency request with eight daily digests and breaking alerts.
 
-**How to apply:** Distinguish four scheduled briefings from an interval that sends only when qualifying stories exist; establish intended daily times and empty-news behavior before promising four daily deliveries.
+**How to apply:** Preserve eight scheduled digests, not four or an hourly interval. Explain polling latency rather than promising instantaneous event detection. Do not let older task plans overwrite the latest frequency.
 
-Explain the exact next step and additional cost before making paid deployment changes.
+Keep the existing hosting setup and ask before adding paid services or changing hosting. Explain the exact next step and additional cost before any proposed paid deployment change.
 
 **Why:** The user explicitly requested cost disclosure before changes.
 

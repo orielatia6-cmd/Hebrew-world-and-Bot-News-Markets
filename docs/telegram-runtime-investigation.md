@@ -1,0 +1,26 @@
+# Obsolete Telegram reply investigation
+
+## Findings — 2026-10-21
+
+- The current source and compiled server bundle do not contain the old dashboard-login reply or login-code generator. An obsolete, unused login-code database column is still in the bundle; it is not a reply generator.
+- Managed development workflow logs explicitly report that Telegram polling and scheduled delivery are disabled in development.
+- Replit deployment metadata reports no active deployment for this project.
+- Read-only Telegram `getMe` succeeded for the expected bot.
+- Read-only `getWebhookInfo` reported no configured webhook, one pending update, and no webhook error. The pending update was not fetched or acknowledged.
+- The initial development version previously could generate the old reply. There is no evidence establishing whether the user's message came from that version, another host, an isolated runtime, or was an older message noticed later.
+- The owner could not establish the old message's timestamp. During a fresh check, the owner sent `/start` and reported no new reply within 30 seconds. This did not reproduce the obsolete reply; it is consistent with an inactive bot, but does not prove that no external instance exists.
+
+## Boundaries
+
+The local shell process list is not an authoritative inventory of managed workflows, isolated task workspaces, or external hosts. Telegram's webhook information does not identify other long-polling clients. These checks cannot prove that no external copy uses the same token.
+
+No credentials were printed, revoked, or rotated. No webhook, ownership, hosting, delivery schedule, or queued Telegram updates were changed.
+
+## Still blocked
+
+1. The origin of the historical reply remains unconfirmed; the owner does not know its timestamp. Do not repeatedly request the old code or timestamp.
+2. If another fresh obsolete reply appears, investigate other running copies with the owner's assistance; do not stop unrelated services without approval.
+3. An intended published production runtime is not currently available. Publication requires the user's action and approval of any hosting costs.
+4. A fresh Hebrew bot-only `/start` response and `/test` delivery must be verified with the owner on the intended runtime before claiming the runtime mismatch is resolved.
+
+This is an investigation snapshot, not evidence of a completed live delivery test.
