@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/hebrew-market-briefing/"
+title = "Briefline | חדשות ושווקים"
+description = "A Hebrew-language world and market news briefing dashboard that tracks global events, Donald Trump, the S&P 500, Nasdaq, Nvidia, Tesla, AI and semiconductors, explains why stories matter and their possible market effects, and delivers updates to Telegram."
+version = "1.0.0"
+id = "artifacts/hebrew-market-briefing"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/hebrew-market-briefing/" ]
+localPort = 20410
+
+[services.development]
+run = "pnpm --filter @workspace/hebrew-market-briefing run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/hebrew-market-briefing", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/hebrew-market-briefing/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20410"
+BASE_PATH = "/hebrew-market-briefing/"
