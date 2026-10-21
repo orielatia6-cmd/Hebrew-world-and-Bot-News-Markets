@@ -1,15 +1,17 @@
-# [Project name]
+# Briefline Telegram News Bot
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Briefline is a Telegram-only Hebrew news bot for important world events, Donald Trump and White House statements, broad markets, major technology stocks, AI, and semiconductors. It explains what happened, why it matters, and possible market effects with links to sources.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the Telegram polling and scheduled-delivery service
+- `pnpm --filter @workspace/hebrew-market-briefing run dev` — run the static bot-start page; it has no dashboard or controls
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required secrets: `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY`
+- The workspace also provides `DATABASE_URL` for PostgreSQL.
 
 ## Stack
 
@@ -22,23 +24,34 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/hebrew-market-briefing` — static Hebrew Telegram launch and setup page only.
+- `artifacts/api-server/src/lib/briefing` — RSS collection, Hebrew analysis, Telegram commands, and scheduler.
+- `lib/db/src/schema/briefing.ts` — persisted preferences and analyzed story archive.
+- `lib/api-spec/openapi.yaml` — source of truth for the health endpoint.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The first private Telegram chat to send `/start` claims the bot; later chats cannot connect to it.
+- RSS feeds are checked every 15 minutes; stories at the configured importance threshold are grouped for delivery on the configured cadence.
+- Story explanations use the user's server-side OpenAI key; it is never sent to the browser.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Reads world, Trump, S&P 500, Nasdaq, Nvidia, Tesla, AI, and semiconductor news from public RSS feeds.
+- Explains each story in Hebrew: what happened, why it matters, and a possible—not predictive—market impact.
+- Delivers stories at importance 4/5 or higher by default, with schedule and threshold adjustable by Telegram commands.
+- Telegram commands: `/status`, `/interval`, `/importance`, `/pause`, `/resume`, `/refresh`, `/test`, and `/help`.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- The product is the Telegram bot, not a website dashboard.
+- All briefings, bot responses, and explanations should be in Hebrew.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- The API server must run continuously for polling and scheduled delivery. Publish using a Reserved VM deployment for unattended operation.
+- `/start` in the bot links the first private chat directly; there is no website login step.
+- After changing an API route, update `lib/api-spec/openapi.yaml` and rerun codegen.
 
 ## Pointers
 
