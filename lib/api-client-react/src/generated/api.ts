@@ -16,7 +16,8 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  HealthStatus
+  HealthStatus,
+  NewsSourceHealth
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -112,6 +113,84 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetNewsSourcesHealthUrl = () => {
+
+
+
+
+  return `/api/briefing/sources`
+}
+
+/**
+ * Returns the latest fetch status for every configured news source
+ * @summary Get news source health
+ */
+export const getNewsSourcesHealth = async ( options?: Parameters<typeof customFetch>[1]): Promise<NewsSourceHealth[]> => {
+
+  return customFetch<NewsSourceHealth[]>(getGetNewsSourcesHealthUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetNewsSourcesHealthQueryKey = () => {
+    return [
+    `/api/briefing/sources`
+    ] as const;
+    }
+
+
+export const getGetNewsSourcesHealthQueryOptions = <TData = Awaited<ReturnType<typeof getNewsSourcesHealth>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNewsSourcesHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNewsSourcesHealthQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNewsSourcesHealth>>> = ({ signal }) => getNewsSourcesHealth({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNewsSourcesHealth>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetNewsSourcesHealthQueryResult = NonNullable<Awaited<ReturnType<typeof getNewsSourcesHealth>>>
+export type GetNewsSourcesHealthQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get news source health
+ */
+
+export function useGetNewsSourcesHealth<TData = Awaited<ReturnType<typeof getNewsSourcesHealth>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getNewsSourcesHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetNewsSourcesHealthQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

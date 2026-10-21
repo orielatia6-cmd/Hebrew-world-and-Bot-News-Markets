@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: briefing
+    description: News briefing operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /briefing/sources:
+    get:
+      operationId: getNewsSourcesHealth
+      tags: [briefing]
+      summary: Get news source health
+      description: Returns the latest fetch status for every configured news source
+      responses:
+        "200":
+          description: News source health
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NewsSourceHealth"
 components:
   schemas:
     HealthStatus:
@@ -33,3 +50,31 @@ components:
           type: string
       required:
         - status
+    NewsSourceHealth:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+          enum: [world, trump, markets]
+        lastAttemptAt:
+          type: ["string", "null"]
+          format: date-time
+        lastSuccessfulFetch:
+          type: ["string", "null"]
+          format: date-time
+        lastError:
+          type: ["string", "null"]
+        recentStoryCount:
+          type: integer
+      required:
+        - id
+        - name
+        - category
+        - lastAttemptAt
+        - lastSuccessfulFetch
+        - lastError
+        - recentStoryCount

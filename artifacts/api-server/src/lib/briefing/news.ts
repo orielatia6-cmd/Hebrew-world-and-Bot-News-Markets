@@ -4,6 +4,7 @@ import Parser from "rss-parser";
 import { eq, inArray, gte } from "drizzle-orm";
 import {
   db,
+  briefingFeedHealthTable,
   briefingSettingsTable,
   briefingStoriesTable,
 } from "@workspace/db";
@@ -51,6 +52,16 @@ type Analysis = {
   importance: number;
   sentiment: Sentiment;
   tickers: string[];
+};
+
+type FeedHealth = {
+  id: string;
+  name: string;
+  category: Category;
+  lastAttemptAt: Date | null;
+  lastSuccessfulFetch: Date | null;
+  lastError: string | null;
+  recentStoryCount: number;
 };
 
 const feeds: FeedDefinition[] = [
@@ -169,11 +180,91 @@ async function fetchFeed(feed: FeedDefinition): Promise<Candidate[]> {
     .slice(0, 20);
 }
 
+function describeFeedError(reason: unknown): string {
+  if (reason instanceof Error) {
+    const httpStatus = reason.message.match(/^Feed returned HTTP (\d+)\./);
+    if (httpStatus) return `HTTP ${httpStatus[1]}`;
+    if (reason.name === "TimeoutError" || reason.name === "AbortError") {
+      return "Timeout";
+    }
+  }
+  return "Feed unavailable";
+}
+
+async function recordFeedResults(
+  results: PromiseSettledResult<Candidate[]>[],
+): Promise<void> {
+  const attemptedAt = new Date();
+  const writes = await Promise.allSettled(
+    results.map(async (result, index) => {
+      const feed = feeds[index];
+      if (!feed) return;
+
+      const id = sourceIdentity(feed.url);
+      const success = result.status === "fulfilled";
+      await db
+        .insert(briefingFeedHealthTable)
+        .values({
+          id,
+          name: feed.name,
+          category: feed.category,
+          lastAttemptAt: attemptedAt,
+          lastSuccessfulFetch: success ? attemptedAt : null,
+          lastError: success ? null : describeFeedError(result.reason),
+          recentStoryCount: success ? result.value.length : 0,
+        })
+        .onConflictDoUpdate({
+          target: briefingFeedHealthTable.id,
+          set: {
+            name: feed.name,
+            category: feed.category,
+            lastAttemptAt: attemptedAt,
+            ...(success
+              ? {
+                  lastSuccessfulFetch: attemptedAt,
+                  lastError: null,
+                  recentStoryCount: result.value.length,
+                }
+              : { lastError: describeFeedError(result.reason) }),
+          },
+        });
+    }),
+  );
+
+  writes.forEach((result, index) => {
+    if (result.status === "rejected") {
+      logger.error(
+        { feed: feeds[index]?.name, err: result.reason },
+        "Could not persist news feed status",
+      );
+    }
+  });
+}
+
+export async function getNewsSourceHealth(): Promise<FeedHealth[]> {
+  const rows = await db.select().from(briefingFeedHealthTable);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+
+  return feeds.map((feed) => {
+    const saved = byId.get(sourceIdentity(feed.url));
+    return {
+      id: sourceIdentity(feed.url),
+      name: feed.name,
+      category: feed.category,
+      lastAttemptAt: saved?.lastAttemptAt ?? null,
+      lastSuccessfulFetch: saved?.lastSuccessfulFetch ?? null,
+      lastError: saved?.lastError ?? null,
+      recentStoryCount: saved?.recentStoryCount ?? 0,
+    };
+  });
+}
+
 async function collectNewCandidates(): Promise<{
   fetched: number;
   candidates: Candidate[];
 }> {
   const feedResults = await Promise.allSettled(feeds.map(fetchFeed));
+  await recordFeedResults(feedResults);
   const candidates: Candidate[] = [];
   let successfulFeeds = 0;
   for (let index = 0; index < feedResults.length; index += 1) {

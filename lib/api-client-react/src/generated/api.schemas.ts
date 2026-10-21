@@ -9,3 +9,25 @@ export interface HealthStatus {
   status: string;
 }
 
+export type NewsSourceHealthCategory = typeof NewsSourceHealthCategory[keyof typeof NewsSourceHealthCategory];
+
+
+export const NewsSourceHealthCategory = {
+  world: 'world',
+  trump: 'trump',
+  markets: 'markets',
+} as const;
+
+export interface NewsSourceHealth {
+  id: string;
+  name: string;
+  category: NewsSourceHealthCategory;
+  /** @nullable */
+  lastAttemptAt: string | null;
+  /** @nullable */
+  lastSuccessfulFetch: string | null;
+  /** @nullable */
+  lastError: string | null;
+  recentStoryCount: number;
+}
+

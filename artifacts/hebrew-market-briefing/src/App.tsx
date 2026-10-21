@@ -1,4 +1,5 @@
 import { Bell, Clock3, Send } from "lucide-react";
+import { FeedHealth } from "@/components/feed-health";
 
 const botUrl = "https://t.me/Oriel_news_bot";
 
@@ -32,6 +33,8 @@ export default function App() {
           Nasdaq, Nvidia, Tesla, בינה מלאכותית ושבבים. כל תדרוך מסביר מה קרה,
           למה זה חשוב ומה עשויה להיות ההשפעה על השוק, עם קישור למקור.
         </p>
+
+        <FeedHealth />
 
         <a
           href={botUrl}

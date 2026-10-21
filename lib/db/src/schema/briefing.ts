@@ -18,6 +18,16 @@ export const briefingSettingsTable = pgTable("briefing_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 
+export const briefingFeedHealthTable = pgTable("briefing_feed_health", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  category: text("category").notNull().$type<"world" | "trump" | "markets">(),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  lastSuccessfulFetch: timestamp("last_successful_fetch", { withTimezone: true }),
+  lastError: text("last_error"),
+  recentStoryCount: integer("recent_story_count").notNull().default(0),
+});
+
 export const briefingStoriesTable = pgTable(
   "briefing_stories",
   {

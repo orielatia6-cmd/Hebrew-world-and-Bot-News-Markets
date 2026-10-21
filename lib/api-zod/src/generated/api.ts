@@ -17,3 +17,19 @@ export const HealthCheckResponse = zod.object({
 })
 
 
+/**
+ * Returns the latest fetch status for every configured news source
+ * @summary Get news source health
+ */
+export const GetNewsSourcesHealthResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "category": zod.enum(['world', 'trump', 'markets']),
+  "lastAttemptAt": zod.coerce.date().nullable(),
+  "lastSuccessfulFetch": zod.coerce.date().nullable(),
+  "lastError": zod.string().nullable(),
+  "recentStoryCount": zod.number().int()
+})
+export const GetNewsSourcesHealthResponse = zod.array(GetNewsSourcesHealthResponseItem)
+
+

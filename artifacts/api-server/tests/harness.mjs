@@ -57,8 +57,10 @@ export function fixture() {
   const warnings = [];
   const table = (name) => new Proxy({ name }, { get: (target, key) => key === "name" ? target.name : key });
   const settingsTable = table("settings");
+  const feedHealthTable = table("feedHealth");
   const storiesTable = table("stories");
-  const rows = (t) => t === settingsTable ? [settings] : stories;
+  const feedHealth = [];
+  const rows = (t) => t === settingsTable ? [settings] : t === feedHealthTable ? feedHealth : stories;
   const compare = (op) => (key, value) => (row) => op(row[key], value);
   const orm = {
     eq: compare((a, b) => a === b),
@@ -94,27 +96,45 @@ export function fixture() {
       } }; } };
     },
     insert(t) {
-      return { values(values) { return { onConflictDoNothing() {
+      return { values(values) {
         const inserted = [];
-        for (const value of Array.isArray(values) ? values : [values]) {
-          if (rows(t).some((r) => r.sourceId === value.sourceId)) continue;
-          const row = { id: stories.length + 1, deliveredAt: null, createdAt: new Date(), ...value };
-          rows(t).push(row);
-          inserted.push(row);
-        }
-        return { returning: async () => inserted };
-      } }; } };
+        const list = Array.isArray(values) ? values : [values];
+        return {
+          onConflictDoNothing() {
+            for (const value of list) {
+              if (rows(t).some((r) => r.sourceId === value.sourceId)) continue;
+              const row = { id: stories.length + 1, deliveredAt: null, createdAt: new Date(), ...value };
+              rows(t).push(row);
+              inserted.push(row);
+            }
+            return { returning: async () => inserted };
+          },
+          onConflictDoUpdate({ target, set }) {
+            for (const value of list) {
+              const existing = rows(t).find((row) => row[target] === value[target]);
+              if (existing) Object.assign(existing, set);
+              else rows(t).push({ ...value });
+            }
+            return Promise.resolve();
+          },
+        };
+      } };
     },
   };
   const mocks = {
-    "@workspace/db": { db, briefingSettingsTable: settingsTable, briefingStoriesTable: storiesTable },
+    "@workspace/db": {
+      db,
+      briefingSettingsTable: settingsTable,
+      briefingFeedHealthTable: feedHealthTable,
+      briefingStoriesTable: storiesTable,
+    },
     "drizzle-orm": orm,
     store: {
       ensureBriefingSettings: async () => ({ ...settings }),
     },
     logger: { logger: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) } },
   };
-  return { settings, stories, sent, warnings, mocks };
+  return { settings, stories, feedHealth, sent, warnings, mocks };
 }
 
 export function story(id, importance = 4) {
