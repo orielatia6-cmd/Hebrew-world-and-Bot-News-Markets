@@ -1,1 +1,1 @@
-- [Bot operating requirements](bot-operating-requirements.md) — preserve the existing app; eight Hebrew digests daily plus breaking alerts; ask before hosting or paid-service changes.
+- [Bot operating requirements](bot-operating-requirements.md) — preserve the existing app and 24 hourly Hebrew digests; ask before hosting or paid-service changes.

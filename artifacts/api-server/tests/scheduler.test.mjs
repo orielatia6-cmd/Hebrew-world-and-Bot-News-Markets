@@ -33,6 +33,10 @@ test("scheduled slot sends at boundary, not before; only recent eligible undeliv
   assert.equal(f.stories[4].deliveredAt, null);
   assert.ok(f.settings.lastSentAt instanceof Date);
   assert.match(f.sent[0].text, /תדרוך חדשות חשוב/);
+  assert.match(f.sent[0].text, /פורסם:/);
+  assert.match(f.sent[0].text, /מה קרה \(לפי המקור\):/);
+  assert.match(f.sent[0].text, /השפעה אפשרית על השוק \(ניתוח\):/);
+  assert.match(f.sent[0].text, /מקור: BBC World\nhttps:\/\/example\.test\/2/);
   assert.equal(await dispatchPendingStories(), 0);
 });
 
@@ -67,7 +71,7 @@ test("failed send records error without marking delivery; next tick retries succ
 
 test("feed refresh cadence is fifteen minutes; no digest is sent outside a slot", async (t) => {
   const { f, schedulerTick, refreshes } = await schedulerFixture(t);
-  t.mock.timers.setTime(Date.parse("2026-07-01T03:00:00Z"));
+  t.mock.timers.setTime(Date.parse("2026-07-01T03:16:00Z"));
   f.settings.lastCheckedAt = new Date(Date.now() - 15 * 60_000 + 1);
   await schedulerTick();
   assert.equal(refreshes(), 0);
@@ -81,11 +85,25 @@ test("feed refresh cadence is fifteen minutes; no digest is sent outside a slot"
 test("an empty scheduled digest is sent once per slot", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   assert.equal(await dispatchPendingStories(), 0);
-  assert.equal(f.sent.length, 1);
-  assert.ok(f.settings.lastSentAt instanceof Date);
-  assert.match(f.sent[0].text, /אין כרגע ידיעות חדשות/);
+  assert.equal(f.sent.length, 0, "no placeholder digest is sent when there is no important news");
+  assert.equal(f.settings.lastSentAt, null, "a silent slot is not reported as a delivered digest");
+  assert.ok(f.settings.lastProcessedDigestSlotAt instanceof Date);
   await dispatchPendingStories();
-  assert.equal(f.sent.length, 1);
+  assert.equal(f.sent.length, 0);
+});
+
+test("long story paragraphs are split without dropping text or exceeding Telegram limits", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  const longSummary = Array.from({ length: 500 }, (_, index) => `פרט${index}.`).join(" ");
+  f.stories.push({ ...story(1), summary: longSummary });
+
+  assert.equal(await dispatchPendingStories(), 1);
+  assert.ok(f.sent.length > 1, "long item should be delivered in multiple messages");
+  assert.ok(f.sent.every((message) => message.text.length <= 3_800));
+  const allText = f.sent.map((message) => message.text).join("\n");
+  for (let index = 0; index < 500; index += 1) {
+    assert.ok(allText.includes(`פרט${index}.`), `missing source text token ${index}`);
+  }
 });
 
 test("breaking alerts can send overnight without consuming the next scheduled slot or repeating stories", async (t) => {

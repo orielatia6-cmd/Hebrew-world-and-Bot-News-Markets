@@ -147,7 +147,7 @@ export function story(id, importance = 4) {
     eventKey: `event-${id}`, originalTitle: `Original ${id}`,
     title: "כותרת", summary: "סיכום",
     whyItMatters: "חשיבות", marketImpact: "השפעה",
-    url: `https://example.test/${id}`, category: "world",
+    url: `https://example.test/${id}`, sourceName: "BBC World", category: "world",
     importance, tickers: [], deliveredAt: null, createdAt: new Date(), publishedAt: new Date(),
   };
 }

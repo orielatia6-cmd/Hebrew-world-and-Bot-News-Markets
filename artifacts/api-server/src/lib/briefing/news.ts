@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isIP } from "node:net";
 import OpenAI from "openai";
 import Parser from "rss-parser";
 import { desc, eq, inArray, gte } from "drizzle-orm";
@@ -193,14 +194,20 @@ function candidatePriority(candidate: Pick<Candidate, "title" | "articleContext"
   const ageHours = candidate.publishedAt
     ? Math.max(0, (now - candidate.publishedAt.getTime()) / 3_600_000)
     : 48;
-  const freshnessScore = Math.max(0, 3 - ageHours / 16);
+  const freshnessScore = Math.max(0, 3 - Math.floor(ageHours / 16));
   const categoryScore = candidate.category === "world" ? 1 : 1.5;
   return topicScore * 2 + freshnessScore + sourceCredibility(candidate.sourceName) + categoryScore;
 }
 
 function topicTokens(value: string): Set<string> {
+  const stopWords = new Set([
+    "the", "and", "for", "from", "with", "after", "before", "that", "this",
+    "has", "have", "was", "were", "will", "into", "over", "under", "about",
+    "says", "said", "news", "update", "report", "reports", "today",
+  ]);
   return new Set(
-    value.toLocaleLowerCase("en-US").match(/[a-z0-9$][a-z0-9$.-]{1,}/g) ?? [],
+    (value.toLocaleLowerCase("en-US").match(/[a-z0-9$][a-z0-9$.-]{1,}/g) ?? [])
+      .filter((token) => !stopWords.has(token)),
   );
 }
 
@@ -214,7 +221,7 @@ function relatedPriorReports(candidate: Candidate, reports: PriorReport[]): Prio
     const overlap = [...candidateTokens].filter((token) => previousTokens.has(token)).length;
     const union = new Set([...candidateTokens, ...previousTokens]).size;
     const score = union ? overlap / union : 0;
-    return score >= 0.12 || similarHeadline(candidate.title, report.originalTitle)
+    return score >= 0.2 || similarHeadline(candidate.title, report.originalTitle)
       ? [{ report, score }]
       : [];
   });
@@ -250,6 +257,15 @@ function itemSourceName(item: FeedItem, fallback: string): string {
   return item.creator?.trim() || fallback;
 }
 
+function publishedDate(item: FeedItem): Date | null {
+  for (const rawDate of [item.isoDate, item.pubDate]) {
+    if (!rawDate) continue;
+    const date = new Date(rawDate);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return null;
+}
+
 async function directArticleLink(link: string): Promise<string> {
   let parsed: URL;
   try {
@@ -277,7 +293,7 @@ async function directArticleLink(link: string): Promise<string> {
       destination.hostname === "news.google.com" ||
       destination.hostname === "localhost" ||
       destination.hostname.endsWith(".local") ||
-      /^\d{1,3}(?:\.\d{1,3}){3}$/.test(destination.hostname)
+      isIP(destination.hostname.replace(/^\[|\]$/g, "")) !== 0
     ) {
       return link;
     }
@@ -302,10 +318,7 @@ async function fetchFeed(feed: FeedDefinition): Promise<Candidate[]> {
       const url = item.link?.trim();
       if (!title || !url || !/^https?:\/\//i.test(url)) return null;
 
-      const rawDate = item.isoDate ?? item.pubDate;
-      const parsedDate = rawDate ? new Date(rawDate) : null;
-      const publishedAt =
-        parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+      const publishedAt = publishedDate(item);
       if (
         !publishedAt ||
         publishedAt.getTime() < cutoff ||
@@ -318,8 +331,6 @@ async function fetchFeed(feed: FeedDefinition): Promise<Candidate[]> {
         item.contentSnippet ?? item.summary ?? item.content ?? "",
       ).slice(0, 2_400);
       const sourceName = itemSourceName(item, feed.name);
-      const directUrl = await directArticleLink(url);
-
       const partial = {
         title,
         articleContext,
@@ -331,7 +342,7 @@ async function fetchFeed(feed: FeedDefinition): Promise<Candidate[]> {
         sourceId: sourceIdentity(url),
         revisionKey: contentRevisionKey(title, articleContext),
         title,
-        url: directUrl,
+        url,
         sourceName,
         publishedAt,
         articleContext,
@@ -533,6 +544,12 @@ async function collectNewCandidates(): Promise<{
     selected.push(candidate);
   }
 
+  await Promise.all(
+    selected.map(async (candidate) => {
+      candidate.url = await directArticleLink(candidate.url);
+    }),
+  );
+
   return {
     fetched: candidates.length,
     candidates: selected,
@@ -599,6 +616,9 @@ function parseAnalysis(value: unknown, candidates: Candidate[]): Analysis[] {
     );
     const requestedEventKey =
       typeof item.eventKey === "string" ? item.eventKey.trim() : "";
+    if (knownEventKeys.size > 0 && !knownEventKeys.has(requestedEventKey)) {
+      return [];
+    }
     const eventKey = knownEventKeys.has(requestedEventKey)
       ? requestedEventKey
       : `new:${sourceId}`;

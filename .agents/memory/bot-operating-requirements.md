@@ -3,11 +3,11 @@ name: Bot operating requirements
 description: User's operating goal and deployment approval boundary for the existing Telegram bot.
 ---
 
-Preserve the existing project rather than rebuilding completed features. The user's latest plan is four Hebrew scheduled digests per day using GitHub Actions and Neon Free, accepting delayed news and no instant breaking alerts.
+Preserve the existing project rather than rebuilding completed features. The user's current requirement is 24 hourly Hebrew digest slots per day, plus existing breaking-news checks.
 
-**Why:** The user explicitly changed the schedule to four daily summaries and accepted delayed delivery as a low-cost tradeoff.
+**Why:** The user explicitly corrected the schedule expectation and asked that this existing hourly schedule remain unchanged.
 
-**How to apply:** Preserve four daily Israel-time digests. GitHub Actions is a scheduled runner, not an always-on Telegram poller; explain command and alert delays. Do not restore the older eight-digest schedule unless asked.
+**How to apply:** Preserve the existing hourly Israel-time schedule and news-check cadence unless the user asks to change them.
 
 Keep the existing hosting setup and ask before adding paid services or changing hosting. Explain the exact next step and additional cost before any proposed paid deployment change.
 

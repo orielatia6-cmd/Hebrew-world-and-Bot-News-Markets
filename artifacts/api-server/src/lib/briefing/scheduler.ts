@@ -33,12 +33,22 @@ function sourceTrustRank(sourceName: string): number {
       : 0;
 }
 
+function formatPublishedAt(value: Date | null): string {
+  if (!value) return "מועד הפרסום לא זמין";
+  return new Intl.DateTimeFormat("he-IL", {
+    timeZone: "Asia/Jerusalem",
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(value);
+}
+
 function storyParagraphs(story: typeof briefingStoriesTable.$inferSelect): string[] {
   const tickers =
     story.tickers.length > 0 ? `\nסימולים: ${story.tickers.join(", ")}` : "";
   return [
     `${categoryLabel(story.category)} · חשיבות ${story.importance}/5`,
     story.title,
+    `פורסם: ${formatPublishedAt(story.publishedAt)}`,
     `מה קרה (לפי המקור): ${story.summary}`,
     `למה זה חשוב: ${story.whyItMatters}`,
     `השפעה אפשרית על השוק (ניתוח): ${story.marketImpact}${tickers}`,
@@ -92,13 +102,20 @@ function splitStoriesIntoMessages(
   stories: (typeof briefingStoriesTable.$inferSelect)[],
   breaking: boolean,
 ): TelegramChunk[] {
-  const header = [
-    breaking ? "התראת חדשות משמעותית" : "תדרוך חדשות חשוב",
+  const headerFor = (continued: boolean) => [
+    continued
+      ? breaking
+        ? "המשך התראת החדשות"
+        : "המשך התדרוך"
+      : breaking
+        ? "התראת חדשות משמעותית"
+        : "תדרוך חדשות חשוב",
     "העובדות מיוחסות למקור; השפעת השוק היא ניתוח אפשרי בלבד, לא תחזית או ייעוץ השקעות.",
     "",
   ].join("\n");
   const footer = `תדרוכים: ${scheduleHebrew()}\nלהשהיה: /pause`;
-  const contentBudget = TELEGRAM_SAFE_LENGTH - header.length - footer.length - 12;
+  const maxHeaderLength = Math.max(headerFor(false).length, headerFor(true).length);
+  const contentBudget = TELEGRAM_SAFE_LENGTH - maxHeaderLength - footer.length - 12;
   const messages: TelegramChunk[] = [];
   let paragraphs: string[] = [];
   let storyIds = new Set<number>();
@@ -106,7 +123,7 @@ function splitStoriesIntoMessages(
 
   const flush = () => {
     if (paragraphs.length === 0) return;
-    const text = `${header}${paragraphs.join("\n\n")}\n\n${footer}`;
+    const text = `${headerFor(messages.length > 0)}${paragraphs.join("\n\n")}\n\n${footer}`;
     if (text.length > TELEGRAM_SAFE_LENGTH) {
       throw new Error("A Telegram briefing chunk exceeded its safe message limit.");
     }
@@ -155,7 +172,7 @@ async function dispatchPendingStories(force = false, breaking = false): Promise<
       (left, right) =>
         right.importance - left.importance ||
         sourceTrustRank(right.sourceName) - sourceTrustRank(left.sourceName) ||
-        right.publishedAt.getTime() - left.publishedAt.getTime(),
+        (right.publishedAt?.getTime() ?? 0) - (left.publishedAt?.getTime() ?? 0),
     )
     .slice(0, MAX_STORIES_PER_DIGEST);
 

@@ -45,7 +45,7 @@ test("only the first private chat pairs; non-owner commands cannot modify settin
   await update(202, "/interval 15");
   await update(202, "/importance 3");
   assert.equal(f.settings.enabled, true);
-  assert.equal(f.settings.deliveryIntervalMinutes, 360);
+  assert.equal(f.settings.deliveryIntervalMinutes, 60);
   assert.equal(f.settings.minImportance, 4);
   await update(101, "/pause");
   assert.equal(f.settings.enabled, false);
@@ -55,14 +55,16 @@ test("only the first private chat pairs; non-owner commands cannot modify settin
   assert.equal(f.settings.enabled, true);
 });
 
-test("legacy interval commands cannot change the four-digest schedule; importance remains adjustable", async (t) => {
+test("legacy interval commands cannot change the 24-hourly schedule; importance remains adjustable", async (t) => {
   const { f, update } = await telegramFixture(t);
   for (const input of ["15", "30", "60", "120", "360", "0", "bad", ""]) {
     await update(101, `/interval ${input}`);
-    assert.equal(f.settings.deliveryIntervalMinutes, 360);
+    assert.equal(f.settings.deliveryIntervalMinutes, 60);
     const schedule = f.sent.at(-1).text.match(/תדרוכים ביום: ([^\n]+)/)?.[1] ?? "";
     assert.match(schedule, /שעון ישראל/);
-    assert.equal((schedule.match(/\d{2}:00/g) ?? []).length, 4);
+    const hours = schedule.match(/\d{2}:00/g) ?? [];
+    assert.equal(hours.length, 24);
+    assert.equal(new Set(hours).size, 24);
   }
   for (const importance of [3, 4, 5]) {
     await update(101, `/importance ${importance}`);
