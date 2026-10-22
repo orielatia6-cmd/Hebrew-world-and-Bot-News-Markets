@@ -9,9 +9,9 @@ async function schedulerFixture(t) {
   const scheduler = await load("lib/briefing/scheduler.ts", {
     ...f.mocks,
     news: { refreshNews: async () => { refreshes++; return { fetched: 0, analyzed: 0, newStories: 0 }; } },
-    telegram: { sendTelegramMessage: async (chatId, text) => {
+    telegram: { sendTelegramMessage: async (chatId, text, parseMode) => {
       if (f.failSend) throw new Error("Telegram unavailable");
-      f.sent.push({ chatId, text });
+      f.sent.push({ chatId, text, parseMode });
     } },
   }, { "scheduler.ts": ["dispatchPendingStories", "schedulerTick"] });
   return { ...scheduler, f, refreshes: () => refreshes };
@@ -19,25 +19,94 @@ async function schedulerFixture(t) {
 
 test("scheduled slot sends at boundary, not before; only recent eligible undelivered stories", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
-  f.stories.push(story(1, 3), story(2, 4), story(3, 5), { ...story(4, 5), deliveredAt: new Date() });
+  f.stories.push(
+    story(1, 3),
+    { ...story(2, 4), title: "כותרת 2" },
+    { ...story(3, 5), title: "כותרת 3" },
+    { ...story(4, 5), deliveredAt: new Date() },
+  );
   f.stories.push({ ...story(5, 5), publishedAt: new Date("2026-06-28T04:00:00Z") });
   t.mock.timers.setTime(Date.parse("2026-07-01T04:59:59.999Z"));
   assert.equal(await dispatchPendingStories(), 0);
   assert.equal(f.sent.length, 0);
   t.mock.timers.setTime(Date.parse("2026-07-01T05:00:00Z"));
   assert.equal(await dispatchPendingStories(), 2);
-  assert.equal(f.sent.length, 1);
+  assert.equal(f.sent.length, 2);
   assert.equal(f.stories[0].deliveredAt, null);
   assert.ok(f.stories[1].deliveredAt instanceof Date);
   assert.ok(f.stories[2].deliveredAt instanceof Date);
   assert.equal(f.stories[4].deliveredAt, null);
   assert.ok(f.settings.lastSentAt instanceof Date);
-  assert.match(f.sent[0].text, /תדרוך חדשות חשוב/);
-  assert.match(f.sent[0].text, /פורסם:/);
-  assert.match(f.sent[0].text, /מה קרה \(לפי המקור\):/);
-  assert.match(f.sent[0].text, /השפעה אפשרית על השוק \(ניתוח\):/);
-  assert.match(f.sent[0].text, /מקור: BBC World\nhttps:\/\/example\.test\/2/);
+  assert.match(f.sent[0].text, /כותרת 3/);
+  assert.match(f.sent[1].text, /כותרת 2/);
+  assert.ok(f.sent.every(({ text, parseMode }) =>
+    parseMode === "HTML" &&
+    /NEWS/.test(text) &&
+    /AI ANALYSIS/.test(text) &&
+    /AI RECOMMENDATION/.test(text) &&
+    /POTENTIAL MARKET IMPACT/.test(text) &&
+    /🕒/.test(text) &&
+    /<a href="https:\/\/example\.test\/\d+">BBC World<\/a>/.test(text),
+  ));
   assert.equal(await dispatchPendingStories(), 0);
+});
+
+test("each story is one complete formatted message with a practical market-aware recommendation", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  f.stories.push(
+    {
+      ...story(1, 5),
+      category: "markets",
+      title: "כותרת <שוק> & בדיקה",
+      summary: "המקור מתאר התפתחות בשוק. בדיווח מופיעים פרטים נוספים.",
+      whyItMatters: "ההתפתחות עשויה להשפיע על ציפיות המשקיעים.",
+      marketImpact: "ההשפעה על מניות השבבים תלויה בפרטים נוספים.",
+      sentiment: "positive",
+      tickers: ["NVDA"],
+      sourceName: "Reuters & Desk",
+      url: "https://example.test/article?one=1&two=2",
+    },
+    {
+      ...story(2, 4),
+      category: "world",
+      title: "התפתחות אזרחית",
+      summary: "המקור מדווח על התפתחות אזרחית. פרטים נוספים מופיעים בדיווח.",
+      whyItMatters: "ההתפתחות עשויה להשפיע על הקהילה המקומית.",
+      marketImpact: "אין קשר ישיר לשוק על סמך המידע הזמין.",
+      sentiment: "neutral",
+      tickers: [],
+    },
+  );
+
+  assert.equal(await dispatchPendingStories(), 2);
+  assert.equal(f.sent.length, 2, "each story must be delivered in its own single message");
+  const financialMessage = f.sent.find(({ text }) => text.includes("כותרת &lt;שוק&gt; &amp; בדיקה"));
+  const nonfinancialMessage = f.sent.find(({ text }) => text.includes("התפתחות אזרחית"));
+  assert.ok(financialMessage);
+  assert.ok(nonfinancialMessage);
+  assert.equal(financialMessage.parseMode, "HTML");
+  assert.equal(nonfinancialMessage.parseMode, "HTML");
+
+  const headings = [
+    "NEWS", "AI ANALYSIS", "AI RECOMMENDATION", "POTENTIAL MARKET IMPACT",
+  ];
+  let previousIndex = -1;
+  for (const heading of headings) {
+    const index = financialMessage.text.indexOf(heading);
+    assert.ok(index > previousIndex, `${heading} should appear in the required order`);
+    previousIndex = index;
+  }
+  assert.match(financialMessage.text, /שורי:/);
+  assert.match(financialMessage.text, /דובי:/);
+  assert.match(financialMessage.text, /לא ודאי:/);
+  assert.match(financialMessage.text, /סימולים רלוונטיים: NVDA/);
+  assert.match(
+    financialMessage.text,
+    /<a href="https:\/\/example\.test\/article\?one=1&amp;two=2">Reuters &amp; Desk<\/a>/,
+  );
+  assert.match(nonfinancialMessage.text, /לעקוב אחר עדכונים מאומתים בנושא/);
+  assert.doesNotMatch(nonfinancialMessage.text, /שורי:|דובי:|לא ודאי:/);
+  assert.equal((financialMessage.text.match(/NEWS/g) ?? []).length, 1);
 });
 
 test("paused or unpaired delivery does not consume stories; resume delivers", async (t) => {
@@ -92,18 +161,14 @@ test("an empty scheduled digest is sent once per slot", async (t) => {
   assert.equal(f.sent.length, 0);
 });
 
-test("long story paragraphs are split without dropping text or exceeding Telegram limits", async (t) => {
+test("oversized stories fail before sending instead of splitting or truncating", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   const longSummary = Array.from({ length: 500 }, (_, index) => `פרט${index}.`).join(" ");
   f.stories.push({ ...story(1), summary: longSummary });
 
-  assert.equal(await dispatchPendingStories(), 1);
-  assert.ok(f.sent.length > 1, "long item should be delivered in multiple messages");
-  assert.ok(f.sent.every((message) => message.text.length <= 3_800));
-  const allText = f.sent.map((message) => message.text).join("\n");
-  for (let index = 0; index < 500; index += 1) {
-    assert.ok(allText.includes(`פרט${index}.`), `missing source text token ${index}`);
-  }
+  await assert.rejects(dispatchPendingStories(), /exceeds Telegram's single-message safe limit/);
+  assert.equal(f.sent.length, 0, "an oversized story must not be split or partially sent");
+  assert.equal(f.stories[0].deliveredAt, null);
 });
 
 test("breaking alerts can send overnight without consuming the next scheduled slot or repeating stories", async (t) => {
@@ -112,7 +177,8 @@ test("breaking alerts can send overnight without consuming the next scheduled sl
   f.stories.push(story(1, 5), story(2, 4), { ...story(3, 5), publishedAt: new Date(Date.now() - 3 * 60 * 60_000) });
   assert.equal(await dispatchPendingStories(false, true), 1);
   assert.equal(f.settings.lastSentAt, null);
-  assert.match(f.sent[0].text, /התראת חדשות משמעותית/);
+  assert.match(f.sent[0].text, /NEWS/);
+  assert.match(f.sent[0].text, /AI RECOMMENDATION/);
   assert.equal(await dispatchPendingStories(false, true), 0);
   assert.equal(f.sent.length, 1);
   assert.equal(f.stories[1].deliveredAt, null);

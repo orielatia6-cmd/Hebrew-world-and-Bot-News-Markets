@@ -29,7 +29,7 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
         requests.push(candidates);
         return { choices: [{ message: { content: JSON.stringify({
           stories: candidates.map((c) => ({
-            sourceId: c.sourceId, title: "כותרת", summary: "סיכום", whyItMatters: "חשוב",
+            sourceId: c.sourceId, title: "כותרת", summary: "המקור מתאר את האירוע. הפרטים מופיעים בדיווח.", whyItMatters: "חשוב",
             marketImpact: "השפעה", importance: 3, tickers: [], sentiment: "neutral",
             eventKey: "", materialUpdate: false,
           })),
@@ -90,7 +90,7 @@ test("a failed feed is recorded without blocking stories from healthy feeds", as
         const candidates = JSON.parse(request.messages.find((message) => message.role === "user").content);
         return { choices: [{ message: { content: JSON.stringify({
           stories: candidates.map((candidate) => ({
-            sourceId: candidate.sourceId, title: "כותרת חדשות", summary: "סיכום",
+            sourceId: candidate.sourceId, title: "כותרת חדשות", summary: "המקור מתאר את האירוע. הפרטים מופיעים בדיווח.",
             whyItMatters: "חשוב", marketImpact: "השפעה", importance: 3,
             eventKey: "", materialUpdate: false,
             tickers: [], sentiment: "neutral",
@@ -143,7 +143,7 @@ test("invalid, missing, old, and future publication dates are rejected", async (
         analyzedCandidates.push(...candidates);
         return { choices: [{ message: { content: JSON.stringify({
           stories: candidates.map((candidate) => ({
-            sourceId: candidate.sourceId, title: "חדשות שוק", summary: "הבנק המרכזי פרסם עדכון.",
+            sourceId: candidate.sourceId, title: "חדשות שוק", summary: "הבנק המרכזי פרסם עדכון. ההודעה כוללת פרטים על החלטתו.",
             whyItMatters: "המידע עשוי להשפיע על ציפיות הריבית.", marketImpact: "השפעתו על המדדים אינה ודאית.",
             importance: 4, tickers: [], sentiment: "neutral", eventKey: "", materialUpdate: false,
           })),
@@ -165,18 +165,18 @@ test("factual number and quote validation rejects unsupported claims", async () 
   };
   const base = {
     sourceId: "known", title: "הפד הותיר את הריבית ללא שינוי",
-    summary: "הפדרל ריזרב הותיר את הריבית על 5.25%.",
+    summary: "הפדרל ריזרב הותיר את הריבית על 5.25%. ההחלטה דווחה במקור.",
     whyItMatters: "ההחלטה משפיעה על עלות האשראי.",
     marketImpact: "התגובה במדדים תלויה בציפיות המשקיעים.",
     importance: 4, sentiment: "neutral", tickers: [],
   };
   assert.equal(news.parseAnalysis({ stories: [base] }, [candidate]).length, 1);
   assert.deepEqual(
-    news.parseAnalysis({ stories: [{ ...base, summary: "הריבית נקבעה על 6.25%." }] }, [candidate]),
+    news.parseAnalysis({ stories: [{ ...base, summary: "הריבית נקבעה על 6.25%. פרטים נוספים מופיעים במקור." }] }, [candidate]),
     [],
   );
   assert.deepEqual(
-    news.parseAnalysis({ stories: [{ ...base, summary: "הפד אמר ״ההחלטה מפתיעה״." }] }, [candidate]),
+    news.parseAnalysis({ stories: [{ ...base, summary: "הפד אמר ״ההחלטה מפתיעה״. פרטים נוספים מופיעים במקור." }] }, [candidate]),
     [],
   );
 });
@@ -231,7 +231,7 @@ test("a previously reported event is suppressed unless the analysis marks a mate
           return { choices: [{ message: { content: JSON.stringify({
             stories: candidates.map((candidate) => ({
               sourceId: candidate.sourceId, eventKey: "fed-policy", materialUpdate,
-              title: "עדכון של הפדרל ריזרב", summary: "הבנק המרכזי פרסם הצהרת מדיניות חדשה.",
+              title: "עדכון של הפדרל ריזרב", summary: "הבנק המרכזי פרסם הצהרת מדיניות חדשה. המקור מפרט את תוכן ההצהרה.",
               whyItMatters: "הצהרה חדשה עשויה לשנות את ציפיות המשקיעים.",
               marketImpact: "התגובה במדדים תלויה בפרטי ההצהרה ובציפיות הקודמות.",
               importance: 4, tickers: [], sentiment: "neutral",
@@ -271,9 +271,10 @@ test("analysis rejects foreign IDs/non-Hebrew text and normalizes importance and
   const f = fixture();
   const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["parseAnalysis"] });
   const candidates = [{ sourceId: "known", priorReports: [] }];
-  const valid = { sourceId: "known", title: "כותרת", summary: "סיכום", whyItMatters: "חשוב", marketImpact: "השפעה" };
+  const valid = { sourceId: "known", title: "כותרת", summary: "הדיווח מתאר את האירוע. פרטים נוספים מופיעים במקור.", whyItMatters: "חשוב", marketImpact: "השפעה" };
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, sourceId: "unknown" }] }, candidates), []);
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, summary: "English only" }] }, candidates), []);
+  assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, summary: "משפט עובדתי יחיד." }] }, candidates), []);
   assert.deepEqual(news.parseAnalysis(null, candidates), []);
   assert.deepEqual(
     news.parseAnalysis(

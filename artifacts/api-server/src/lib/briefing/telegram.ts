@@ -62,10 +62,15 @@ export async function getTelegramBotUsername(): Promise<string | null> {
   return username;
 }
 
-export async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
+export async function sendTelegramMessage(
+  chatId: string,
+  text: string,
+  parseMode?: "HTML",
+): Promise<void> {
   await telegramCall("sendMessage", {
     chat_id: chatId,
     text,
+    ...(parseMode ? { parse_mode: parseMode } : {}),
     disable_web_page_preview: true,
   });
 }

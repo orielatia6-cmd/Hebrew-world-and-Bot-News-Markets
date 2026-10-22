@@ -16,9 +16,11 @@ already-analyzed stories, Hebrew analysis validation, importance boundaries,
 delivery cadence, refresh cadence, and successful/failed delivery state.
 
 Scheduler checks use 24 hourly Israel-time digest slots and include slot boundaries,
-no replay, silent empty slots, complete message splitting, recent-story limits, and overnight breaking
-alerts that do not consume the next scheduled slot. Legacy interval commands
-must preserve the hourly schedule.
+no replay, silent empty slots, one complete HTML message per story, section order,
+clickable escaped source links, practical nonfinancial takeaways, conditional market
+scenarios, and fail-closed handling for oversized stories. Recent-story limits and
+overnight breaking alerts that do not consume the next scheduled slot are also covered.
+Legacy interval commands must preserve the hourly schedule.
 
 The temporary-runner tests mock Telegram and cover restricted commands,
 local lock exclusion, production-mode refusal, active webhook refusal, and

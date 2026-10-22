@@ -99,11 +99,13 @@ test("manual refresh throttles for five minutes, rejects outsiders, and resets a
 });
 
 test("long polling has a longer timeout than Telegram's wait; failed sends throw", async (t) => {
-  const { telegram, timeouts } = await telegramFixture(t);
+  const { f, telegram, timeouts } = await telegramFixture(t);
   await telegram.telegramCall("getUpdates?offset=0&timeout=25");
   assert.equal(timeouts.at(-1), 35_000);
   await telegram.sendTelegramMessage("101", "בדיקה");
   assert.equal(timeouts.at(-1), 15_000);
+  await telegram.sendTelegramMessage("101", "<b>חדשות</b>", "HTML");
+  assert.equal(f.sent.at(-1).parse_mode, "HTML");
   t.mock.method(globalThis, "fetch", async () => ({
     ok: false, json: async () => ({ ok: false, description: "delivery failed" }),
   }));

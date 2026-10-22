@@ -9,7 +9,7 @@ import { redactBotToken } from "./secret-safety";
 import { refreshNews } from "./news";
 import { ensureBriefingSettings } from "./store";
 import { sendTelegramMessage } from "./telegram";
-import { digestSlot, scheduleHebrew } from "./schedule";
+import { digestSlot } from "./schedule";
 
 const SOURCE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const MAX_STORIES_PER_DIGEST = 3;
@@ -42,110 +42,76 @@ function formatPublishedAt(value: Date | null): string {
   }).format(value);
 }
 
-function storyParagraphs(story: typeof briefingStoriesTable.$inferSelect): string[] {
-  const tickers =
-    story.tickers.length > 0 ? `\nסימולים: ${story.tickers.join(", ")}` : "";
-  return [
-    `${categoryLabel(story.category)} · חשיבות ${story.importance}/5`,
-    story.title,
-    `פורסם: ${formatPublishedAt(story.publishedAt)}`,
-    `מה קרה (לפי המקור): ${story.summary}`,
-    `למה זה חשוב: ${story.whyItMatters}`,
-    `השפעה אפשרית על השוק (ניתוח): ${story.marketImpact}${tickers}`,
-    `מקור: ${story.sourceName}\n${story.url}`,
-  ];
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-function splitOversizedParagraph(paragraph: string, maxLength: number): string[] {
-  if (paragraph.length <= maxLength) return [paragraph];
-
-  const sentences = paragraph.split(/(?<=[.!?…])\s+/u);
-  const chunks: string[] = [];
-  let current = "";
-  const addPiece = (piece: string) => {
-    if (piece.length <= maxLength) {
-      if (current && current.length + 1 + piece.length > maxLength) {
-        chunks.push(current);
-        current = "";
-      }
-      current = current ? `${current} ${piece}` : piece;
-      return;
-    }
-
-    const words = piece.match(/\S+\s*/gu) ?? [piece];
-    for (const word of words) {
-      if (word.length > maxLength) {
-        if (current) chunks.push(current);
-        current = "";
-        const characters = Array.from(word);
-        while (characters.length > maxLength) {
-          chunks.push(characters.splice(0, maxLength).join(""));
-        }
-        current = characters.join("");
-      } else if (current.length + word.length > maxLength) {
-        chunks.push(current);
-        current = word;
-      } else {
-        current += word;
-      }
-    }
-  };
-
-  for (const sentence of sentences) addPiece(sentence);
-  if (current) chunks.push(current);
-  return chunks;
-}
-
-type TelegramChunk = { text: string; storyIds: number[] };
-
-function splitStoriesIntoMessages(
-  stories: (typeof briefingStoriesTable.$inferSelect)[],
-  breaking: boolean,
-): TelegramChunk[] {
-  const headerFor = (continued: boolean) => [
-    continued
-      ? breaking
-        ? "המשך התראת החדשות"
-        : "המשך התדרוך"
-      : breaking
-        ? "התראת חדשות משמעותית"
-        : "תדרוך חדשות חשוב",
-    "העובדות מיוחסות למקור; השפעת השוק היא ניתוח אפשרי בלבד, לא תחזית או ייעוץ השקעות.",
-    "",
-  ].join("\n");
-  const footer = `תדרוכים: ${scheduleHebrew()}\nלהשהיה: /pause`;
-  const maxHeaderLength = Math.max(headerFor(false).length, headerFor(true).length);
-  const contentBudget = TELEGRAM_SAFE_LENGTH - maxHeaderLength - footer.length - 12;
-  const messages: TelegramChunk[] = [];
-  let paragraphs: string[] = [];
-  let storyIds = new Set<number>();
-  let contentLength = 0;
-
-  const flush = () => {
-    if (paragraphs.length === 0) return;
-    const text = `${headerFor(messages.length > 0)}${paragraphs.join("\n\n")}\n\n${footer}`;
-    if (text.length > TELEGRAM_SAFE_LENGTH) {
-      throw new Error("A Telegram briefing chunk exceeded its safe message limit.");
-    }
-    messages.push({ text, storyIds: [...storyIds] });
-    paragraphs = [];
-    storyIds = new Set<number>();
-    contentLength = 0;
-  };
-
-  for (const story of stories) {
-    for (const paragraph of storyParagraphs(story)) {
-      for (const piece of splitOversizedParagraph(paragraph, contentBudget)) {
-        const addition = piece.length + (paragraphs.length ? 2 : 0);
-        if (contentLength + addition > contentBudget) flush();
-        paragraphs.push(piece);
-        contentLength += piece.length + (paragraphs.length > 1 ? 2 : 0);
-        storyIds.add(story.id);
-      }
-    }
+function isMarketRelated(story: typeof briefingStoriesTable.$inferSelect): boolean {
+  if (story.category === "markets" || story.tickers.length > 0) return true;
+  if (/(?:אין|ללא)\s+(?:קשר|השפעה)\s+(?:ישיר(?:ה)?\s+)?לשוק|לא צפויה השפעה ישירה על השוק/u.test(story.marketImpact)) {
+    return false;
   }
-  flush();
-  return messages;
+  return /שוק|מניות|מדד|מדדים|סקטור|ענף|תשואות|אג"ח|ריבית|נפט|דולר|מטבע|בורסה|nasdaq|s&p|dow|nvidia|tesla|semiconductor|שבבים/u.test(
+    story.marketImpact,
+  );
+}
+
+function recommendationForStory(story: typeof briefingStoriesTable.$inferSelect): string {
+  if (!isMarketRelated(story)) {
+    return `לעקוב אחר עדכונים מאומתים בנושא אצל ${story.sourceName}, ולבדוק אם פרטים חדשים משנים את התמונה.`;
+  }
+
+  const assets = story.tickers.length > 0
+    ? `לעקוב אחר תגובת ${story.tickers.join(", ")}`
+    : "לעקוב אחר תגובת הנכסים והמדדים שמוזכרים בניתוח";
+  const bullish = story.sentiment === "negative"
+    ? "יתפרסמו עדכונים מאומתים שיצמצמו את הסיכון המתואר."
+    : "יתפרסמו עדכונים מאומתים שיחזקו את ההשפעה החיובית שתוארה.";
+  const bearish = story.sentiment === "positive"
+    ? "יתפרסמו עובדות חדשות שיחלישו את ההנחה החיובית."
+    : "יתפרסמו עדכונים מאומתים שיחזקו את הסיכון או את ההשפעה השלילית שתוארה.";
+  return `${assets} והודעת ההמשך בנושא. שורי: אם ${bullish} דובי: אם ${bearish} לא ודאי: אם המידע יישאר חלקי או שהתגובה תהיה מעורבת. זו מסגרת למעקב, לא הוראת קנייה או מכירה.`;
+}
+
+function formatStoryMessage(
+  story: typeof briefingStoriesTable.$inferSelect,
+): string {
+  let sourceUrl: URL;
+  try {
+    sourceUrl = new URL(story.url);
+  } catch {
+    throw new Error(`Story ${story.id} has an invalid source URL.`);
+  }
+  if (!["http:", "https:"].includes(sourceUrl.protocol)) {
+    throw new Error(`Story ${story.id} has an unsupported source URL protocol.`);
+  }
+
+  const tickers = story.tickers.length > 0
+    ? `\nסימולים רלוונטיים: ${escapeHtml(story.tickers.join(", "))}`
+    : "";
+  const text = [
+    `🔴 <b>${escapeHtml(categoryLabel(story.category))} · ${escapeHtml(story.title)}</b>`,
+    "",
+    `📰 <b>NEWS:</b>\n${escapeHtml(story.summary)}`,
+    "",
+    `🧠 <b>AI ANALYSIS:</b>\n${escapeHtml(story.whyItMatters)}`,
+    "",
+    `📈 <b>AI RECOMMENDATION:</b>\n${escapeHtml(recommendationForStory(story))}`,
+    "",
+    `🎯 <b>POTENTIAL MARKET IMPACT:</b>\n${escapeHtml(story.marketImpact)}${tickers}`,
+    "",
+    `🕒 ${formatPublishedAt(story.publishedAt)} · 🔗 <a href="${escapeHtml(sourceUrl.toString())}">${escapeHtml(story.sourceName)}</a>`,
+  ].join("\n");
+
+  if (text.length > TELEGRAM_SAFE_LENGTH) {
+    throw new Error(`Story ${story.id} exceeds Telegram's single-message safe limit.`);
+  }
+  return text;
 }
 
 async function dispatchPendingStories(force = false, breaking = false): Promise<number> {
@@ -186,29 +152,23 @@ async function dispatchPendingStories(force = false, breaking = false): Promise<
     return 0;
   }
 
-  const messages = splitStoriesIntoMessages(pending, breaking);
-  const finalMessageByStory = new Map<number, number>();
-  messages.forEach((message, index) => {
-    message.storyIds.forEach((storyId) => finalMessageByStory.set(storyId, index));
-  });
+  const messages = pending.map((story) => ({
+    text: formatStoryMessage(story),
+    storyId: story.id,
+  }));
 
-  for (const [index, message] of messages.entries()) {
-    await sendTelegramMessage(settings.telegramChatId, message.text);
-    const completedStoryIds = message.storyIds.filter(
-      (storyId) => finalMessageByStory.get(storyId) === index,
-    );
+  for (const message of messages) {
+    await sendTelegramMessage(settings.telegramChatId, message.text, "HTML");
     const deliveredAt = new Date();
-    if (completedStoryIds.length > 0) {
-      await db
-        .update(briefingStoriesTable)
-        .set({ deliveredAt })
-        .where(
-          and(
-            inStoryIds(completedStoryIds),
-            isNull(briefingStoriesTable.deliveredAt),
-          ),
-        );
-    }
+    await db
+      .update(briefingStoriesTable)
+      .set({ deliveredAt })
+      .where(
+        and(
+          inStoryIds([message.storyId]),
+          isNull(briefingStoriesTable.deliveredAt),
+        ),
+      );
     await db
       .update(briefingSettingsTable)
       .set({
