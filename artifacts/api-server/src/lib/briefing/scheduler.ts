@@ -108,10 +108,156 @@ function formatStoryMessage(
     `🕒 ${formatPublishedAt(story.publishedAt)} · 🔗 <a href="${escapeHtml(sourceUrl.toString())}">${escapeHtml(story.sourceName)}</a>`,
   ].join("\n");
 
-  if (text.length > TELEGRAM_SAFE_LENGTH) {
-    throw new Error(`Story ${story.id} exceeds Telegram's single-message safe limit.`);
-  }
   return text;
+}
+
+type HtmlTag = { name: string; opening: string };
+
+function splitHtmlMessage(message: string, maxLength: number): string[] {
+  const rawTokens = message.match(/<[^>]+>|&(?:amp|lt|gt|quot|#39);|[\s\S]/gu) ?? [];
+  const tokens: string[] = [];
+  let textBuffer = "";
+  const flushTextBuffer = () => {
+    if (textBuffer) tokens.push(textBuffer);
+    textBuffer = "";
+  };
+  for (const token of rawTokens) {
+    if (token.startsWith("<") || token.startsWith("&")) {
+      flushTextBuffer();
+      tokens.push(token);
+    } else {
+      textBuffer += token;
+    }
+  }
+  flushTextBuffer();
+
+  const chunks: string[] = [];
+  const openTags: HtmlTag[] = [];
+  let current = "";
+  let currentHasContent = false;
+  const openingMarkup = () => openTags.map((tag) => tag.opening).join("");
+  const closingMarkup = () => [...openTags].reverse().map((tag) => `</${tag.name}>`).join("");
+
+  const flush = () => {
+    if (currentHasContent) {
+      const complete = `${current}${closingMarkup()}`;
+      if (complete.length > maxLength) {
+        throw new Error("A Telegram HTML message exceeded its safe length while closing tags.");
+      }
+      chunks.push(complete);
+    }
+    current = openingMarkup();
+    currentHasContent = false;
+  };
+
+  const appendText = (text: string) => {
+    let remaining = text;
+    while (remaining) {
+      const available = maxLength - current.length - closingMarkup().length;
+      const characters = Array.from(remaining);
+      let fitCount = 0;
+      let fitLength = 0;
+      while (fitCount < characters.length && fitLength + characters[fitCount]!.length <= available) {
+        fitLength += characters[fitCount]!.length;
+        fitCount++;
+      }
+      if (fitCount === characters.length) {
+        current += remaining;
+        currentHasContent = true;
+        return;
+      }
+      if (fitCount === 0) {
+        if (!currentHasContent) {
+          throw new Error("Telegram HTML tags leave no room for message content.");
+        }
+        flush();
+        continue;
+      }
+
+      let cutCount = fitCount;
+      for (let index = fitCount - 1; index >= 0; index--) {
+        if (/\s/u.test(characters[index]!)) {
+          cutCount = index + 1;
+          break;
+        }
+      }
+      const part = characters.slice(0, cutCount).join("");
+      current += part;
+      currentHasContent = true;
+      remaining = characters.slice(cutCount).join("");
+      flush();
+    }
+  };
+
+  for (const token of tokens) {
+    const tag = token.match(/^<(\/?)(b|a)(?:\s+href="[^"]*")?>$/i);
+    if (tag) {
+      const isClosing = tag[1] === "/";
+      const name = tag[2]!.toLowerCase();
+      if (isClosing) {
+        const top = openTags.at(-1);
+        if (!top || top.name !== name) {
+          throw new Error("Telegram message contains unbalanced HTML tags.");
+        }
+        openTags.pop();
+        if (current.length + token.length + closingMarkup().length > maxLength) {
+          openTags.push(top);
+          if (!currentHasContent) {
+            throw new Error("Telegram HTML closing tag exceeds the safe message length.");
+          }
+          flush();
+          openTags.pop();
+        }
+        current += token;
+      } else {
+        const nextTag = { name, opening: token };
+        const nextClosingLength = closingMarkup().length + `</${name}>`.length;
+        if (current.length + token.length + nextClosingLength > maxLength) {
+          if (!currentHasContent) {
+            throw new Error("Telegram HTML opening tag exceeds the safe message length.");
+          }
+          flush();
+        }
+        if (current.length + token.length + nextClosingLength > maxLength) {
+          throw new Error("Telegram HTML opening tag exceeds the safe message length.");
+        }
+        current += token;
+        openTags.push(nextTag);
+      }
+      continue;
+    }
+
+    if (token.startsWith("<")) {
+      throw new Error("Telegram message contains unsupported HTML markup.");
+    }
+    if (token.startsWith("&")) {
+      const available = maxLength - current.length - closingMarkup().length;
+      if (token.length > available) {
+        if (!currentHasContent) {
+          throw new Error("A Telegram HTML entity exceeds the safe message length.");
+        }
+        flush();
+      }
+      if (token.length > maxLength - current.length - closingMarkup().length) {
+        throw new Error("A Telegram HTML entity exceeds the safe message length.");
+      }
+      current += token;
+      currentHasContent = true;
+      continue;
+    }
+    appendText(token);
+  }
+
+  if (openTags.length > 0) {
+    throw new Error("Telegram message contains unclosed HTML tags.");
+  }
+  if (currentHasContent) {
+    if (current.length > maxLength) {
+      throw new Error("A Telegram HTML message exceeded its safe length.");
+    }
+    chunks.push(current);
+  }
+  return chunks;
 }
 
 async function dispatchPendingStories(force = false, breaking = false): Promise<number> {
@@ -152,13 +298,18 @@ async function dispatchPendingStories(force = false, breaking = false): Promise<
     return 0;
   }
 
-  const messages = pending.map((story) => ({
-    text: formatStoryMessage(story),
-    storyId: story.id,
-  }));
+  const messages = pending.flatMap((story) => {
+    const parts = splitHtmlMessage(formatStoryMessage(story), TELEGRAM_SAFE_LENGTH);
+    return parts.map((text, index) => ({
+      text,
+      storyId: story.id,
+      finalPart: index === parts.length - 1,
+    }));
+  });
 
   for (const message of messages) {
     await sendTelegramMessage(settings.telegramChatId, message.text, "HTML");
+    if (!message.finalPart) continue;
     const deliveredAt = new Date();
     await db
       .update(briefingStoriesTable)

@@ -2,15 +2,30 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, load, story } from "./harness.mjs";
 
+function assertBalancedTelegramHtml(text) {
+  const stack = [];
+  const tags = text.match(/<\/?b>|<\/?a(?: href="[^"]*")?>/g) ?? [];
+  for (const tag of tags) {
+    const closing = tag.startsWith("</");
+    const name = tag.match(/^<\/?([a-z]+)/i)?.[1]?.toLowerCase();
+    assert.ok(name === "a" || name === "b", `unexpected HTML tag: ${tag}`);
+    if (closing) assert.equal(stack.pop(), name, `unbalanced closing tag: ${tag}`);
+    else stack.push(name);
+  }
+  assert.deepEqual(stack, [], "all HTML tags must close within the same Telegram message");
+}
+
 async function schedulerFixture(t) {
   const f = fixture();
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-07-01T05:00:00Z") }); // 08:00 Israel summer slot
   let refreshes = 0;
+  let sendAttempts = 0;
   const scheduler = await load("lib/briefing/scheduler.ts", {
     ...f.mocks,
     news: { refreshNews: async () => { refreshes++; return { fetched: 0, analyzed: 0, newStories: 0 }; } },
     telegram: { sendTelegramMessage: async (chatId, text, parseMode) => {
-      if (f.failSend) throw new Error("Telegram unavailable");
+      sendAttempts++;
+      if (f.failSend || f.failOnSendAttempt === sendAttempts) throw new Error("Telegram unavailable");
       f.sent.push({ chatId, text, parseMode });
     } },
   }, { "scheduler.ts": ["dispatchPendingStories", "schedulerTick"] });
@@ -161,14 +176,40 @@ test("an empty scheduled digest is sent once per slot", async (t) => {
   assert.equal(f.sent.length, 0);
 });
 
-test("oversized stories fail before sending instead of splitting or truncating", async (t) => {
+test("oversized stories split into valid HTML messages without losing text", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  const longSummary = Array.from({ length: 500 }, (_, index) => `פרט${index}.`).join(" ");
+  const longTitle = Array.from({ length: 500 }, (_, index) => `כותרת${index}`).join(" ");
+  f.stories.push({ ...story(1), title: longTitle, summary: longSummary });
+
+  assert.equal(await dispatchPendingStories(), 1);
+  assert.ok(f.sent.length > 1, "the long story should be sent as multiple messages");
+  assert.ok(f.sent.every(({ text, parseMode }) =>
+    parseMode === "HTML" && text.length <= 3_800,
+  ));
+  for (const { text } of f.sent) assertBalancedTelegramHtml(text);
+  const allText = f.sent.map(({ text }) => text).join("");
+  for (let index = 0; index < 500; index += 1) {
+    assert.ok(allText.includes(`פרט${index}.`), `missing source text token ${index}`);
+    assert.ok(allText.includes(`כותרת${index}`), `missing bold headline token ${index}`);
+  }
+  assert.ok(f.stories[0].deliveredAt instanceof Date);
+});
+
+test("a failed multipart send leaves the story pending until every part is delivered", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   const longSummary = Array.from({ length: 500 }, (_, index) => `פרט${index}.`).join(" ");
   f.stories.push({ ...story(1), summary: longSummary });
+  f.failOnSendAttempt = 2;
 
-  await assert.rejects(dispatchPendingStories(), /exceeds Telegram's single-message safe limit/);
-  assert.equal(f.sent.length, 0, "an oversized story must not be split or partially sent");
+  await assert.rejects(dispatchPendingStories(), /Telegram unavailable/);
+  assert.equal(f.sent.length, 1);
   assert.equal(f.stories[0].deliveredAt, null);
+
+  f.failOnSendAttempt = null;
+  assert.equal(await dispatchPendingStories(), 1);
+  assert.ok(f.stories[0].deliveredAt instanceof Date);
+  assert.ok(f.sent.length > 2, "retry sends all parts; previously accepted parts may be repeated");
 });
 
 test("breaking alerts can send overnight without consuming the next scheduled slot or repeating stories", async (t) => {
