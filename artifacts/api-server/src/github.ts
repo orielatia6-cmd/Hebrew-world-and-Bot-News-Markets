@@ -9,12 +9,7 @@ async function main(): Promise<void> {
   let client;
   let locked = false;
   try {
-    // Only the four UTC trigger times map to digest slots in Israel. Verify the
-    // local slot before contacting Neon, Telegram, news sources, or OpenAI.
-    if (!digestSlot(new Date(), null)) {
-      console.log("Not an Israel digest slot; no Telegram, database, news, or AI work performed.");
-      return;
-    }
+    
     client = await pool.connect();
     const result = await client.query<{ acquired: boolean }>(
       "SELECT pg_try_advisory_lock($1) AS acquired",
