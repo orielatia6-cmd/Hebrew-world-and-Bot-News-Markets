@@ -4,7 +4,7 @@ on:
   # These four UTC hours map to four Israel-time slots; the local clock
   # shifts by one hour between standard time and daylight saving time.
   schedule:
-    - cron: "05 5,9,13,17 * * *"
+  - cron: "*/15 * * * *"
   workflow_dispatch:
 
 permissions:
