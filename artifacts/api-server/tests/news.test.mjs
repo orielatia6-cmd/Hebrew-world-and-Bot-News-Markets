@@ -15,8 +15,8 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
     ...f.mocks,
     "rss-parser": { default: class { async parseString() {
       return { items: [
-        { title: "News", link: "https://example.test/news#one" },
-        { title: "News again", link: "https://example.test/news#two" },
+        { title: "News", link: "https://example.test/news#one", isoDate: new Date().toISOString() },
+        { title: "News again", link: "https://example.test/news#two", isoDate: new Date().toISOString() },
         { title: "Invalid", link: "javascript:bad" },
         { title: "Old", link: "https://example.test/old", isoDate: "2000-01-01" },
       ] };
@@ -31,6 +31,7 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
           stories: candidates.map((c) => ({
             sourceId: c.sourceId, title: "כותרת", summary: "סיכום", whyItMatters: "חשוב",
             marketImpact: "השפעה", importance: 3, tickers: [], sentiment: "neutral",
+            eventKey: "", materialUpdate: false,
           })),
         }) } }] };
       } } };
@@ -57,7 +58,7 @@ test("an OpenAI request timeout is identified as an analysis timeout without exp
   const news = await load("lib/briefing/news.ts", {
     ...f.mocks,
     "rss-parser": { default: class { async parseString() {
-      return { items: [{ title: "New story", link: "https://example.test/new-story" }] };
+       return { items: [{ title: "New story", link: "https://example.test/new-story", isoDate: new Date().toISOString() }] };
     } } },
     openai: { default: class {
       constructor(options) { assert.equal(options.timeout, 90_000); }
@@ -99,17 +100,17 @@ test("a failed feed is recorded without blocking stories from healthy feeds", as
   });
 
   const result = await news.refreshNews();
-  assert.equal(result.newStories, 5);
-  assert.equal(f.feedHealth.length, 6);
+  assert.equal(result.newStories, 8);
+  assert.equal(f.feedHealth.length, 9);
   const failed = f.feedHealth.find((source) => source.name === "BBC World");
   assert.equal(failed.lastError, "HTTP 503");
   assert.equal(failed.lastSuccessfulFetch, null);
   const healthy = f.feedHealth.filter((source) => source.name !== "BBC World");
-  assert.equal(healthy.length, 5);
+  assert.equal(healthy.length, 8);
   assert.ok(healthy.every((source) => source.lastSuccessfulFetch instanceof Date));
   assert.ok(healthy.every((source) => source.recentStoryCount === 1));
   const healthResponse = await news.getNewsSourceHealth();
-  assert.equal(healthResponse.length, 6);
+  assert.equal(healthResponse.length, 9);
   assert.equal(
     healthResponse.find((source) => source.name === "BBC World").lastError,
     "HTTP 503",
@@ -119,7 +120,7 @@ test("a failed feed is recorded without blocking stories from healthy feeds", as
 test("analysis rejects foreign IDs/non-Hebrew text and normalizes importance and tickers", async () => {
   const f = fixture();
   const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["parseAnalysis"] });
-  const candidates = [{ sourceId: "known" }];
+  const candidates = [{ sourceId: "known", priorReports: [] }];
   const valid = { sourceId: "known", title: "כותרת", summary: "סיכום", whyItMatters: "חשוב", marketImpact: "השפעה" };
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, sourceId: "unknown" }] }, candidates), []);
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, summary: "English only" }] }, candidates), []);

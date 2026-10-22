@@ -49,8 +49,9 @@ export async function load(entry, mocks, exposed = {}) {
 export function fixture() {
   const settings = {
     id: 1, enabled: true, telegramChatId: "101", lastTelegramUpdateId: 0,
-    deliveryIntervalMinutes: 360, minImportance: 4,
-    lastSentAt: null, lastCheckedAt: new Date(), lastError: null,
+    deliveryIntervalMinutes: 60, minImportance: 4,
+    lastSentAt: null, lastProcessedDigestSlotAt: null,
+    lastCheckedAt: new Date(), lastError: null,
   };
   const stories = [];
   const sent = [];
@@ -102,7 +103,10 @@ export function fixture() {
         return {
           onConflictDoNothing() {
             for (const value of list) {
-              if (rows(t).some((r) => r.sourceId === value.sourceId)) continue;
+              if (rows(t).some((r) =>
+                (r.sourceId === value.sourceId && r.revisionKey === value.revisionKey) ||
+                (r.eventKey === value.eventKey && r.revisionKey === value.revisionKey)
+              )) continue;
               const row = { id: stories.length + 1, deliveredAt: null, createdAt: new Date(), ...value };
               rows(t).push(row);
               inserted.push(row);
@@ -139,7 +143,9 @@ export function fixture() {
 
 export function story(id, importance = 4) {
   return {
-    id, sourceId: `source-${id}`, title: "כותרת", summary: "סיכום",
+    id, sourceId: `source-${id}`, revisionKey: `revision-${id}`,
+    eventKey: `event-${id}`, originalTitle: `Original ${id}`,
+    title: "כותרת", summary: "סיכום",
     whyItMatters: "חשיבות", marketImpact: "השפעה",
     url: `https://example.test/${id}`, category: "world",
     importance, tickers: [], deliveredAt: null, createdAt: new Date(), publishedAt: new Date(),

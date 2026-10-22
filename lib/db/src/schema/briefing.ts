@@ -15,6 +15,7 @@ export const briefingSettingsTable = pgTable("briefing_settings", {
   loginCodeExpiresAt: timestamp("login_code_expires_at", { withTimezone: true }),
   lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
   lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  lastProcessedDigestSlotAt: timestamp("last_processed_digest_slot_at", { withTimezone: true }),
   lastError: text("last_error"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
@@ -34,6 +35,9 @@ export const briefingStoriesTable = pgTable(
   {
     id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
     sourceId: text("source_id").notNull(),
+    revisionKey: text("revision_key").notNull(),
+    eventKey: text("event_key").notNull(),
+    originalTitle: text("original_title").notNull(),
     title: text("title").notNull(),
     url: text("url").notNull(),
     sourceName: text("source_name").notNull(),
@@ -49,7 +53,8 @@ export const briefingStoriesTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("briefing_stories_source_id_unique").on(table.sourceId),
+    uniqueIndex("briefing_stories_source_revision_unique").on(table.sourceId, table.revisionKey),
+    uniqueIndex("briefing_stories_event_revision_unique").on(table.eventKey, table.revisionKey),
     index("briefing_stories_created_at_idx").on(table.createdAt),
     index("briefing_stories_category_created_at_idx").on(table.category, table.createdAt),
   ],
