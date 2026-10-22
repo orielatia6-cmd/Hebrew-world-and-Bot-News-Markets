@@ -1,4 +1,4 @@
-const UTC_DIGEST_HOURS = [5, 9, 13, 17];
+const UTC_DIGEST_HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 export function israelDigestHours(now: Date): number[] {
   const offset = new Intl.DateTimeFormat("en-US", {
