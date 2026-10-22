@@ -35,6 +35,10 @@ test("only the first private chat pairs; non-owner commands cannot modify settin
   assert.equal(f.settings.telegramChatId, null);
   await update(101, "/start");
   assert.equal(f.settings.telegramChatId, "101");
+  assert.match(f.sent.at(-1).text, /Briefline מחובר/);
+  await update(101, "/status");
+  assert.match(f.sent.at(-1).text, /מצב העדכונים: פעילים/);
+  assert.match(f.sent.at(-1).text, /תדרוכים:/);
   await update(202, "/start");
   assert.equal(f.settings.telegramChatId, "101");
   await update(202, "/pause");
@@ -77,12 +81,13 @@ test("one-shot Telegram polling handles and persists each update offset", async 
 });
 
 test("manual refresh throttles for five minutes, rejects outsiders, and resets at boundary", async (t) => {
-  const { update, refreshes } = await telegramFixture(t);
+  const { f, update, refreshes } = await telegramFixture(t);
   t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
   await update(202, "/refresh");
   assert.equal(refreshes(), 0);
   await update(101, "/refresh");
   assert.equal(refreshes(), 1);
+  assert.ok(f.sent.some((message) => message.text.includes("הבדיקה הושלמה")));
   t.mock.timers.setTime(1_299_999);
   await update(101, "/refresh");
   assert.equal(refreshes(), 1);

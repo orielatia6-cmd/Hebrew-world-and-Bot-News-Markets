@@ -8,6 +8,8 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
   process.env.OPENAI_API_KEY = "fake-test-key";
   t.after(() => previousKey === undefined ? delete process.env.OPENAI_API_KEY : process.env.OPENAI_API_KEY = previousKey);
   const requests = [];
+  const clientOptions = [];
+  const analysisRequests = [];
   t.mock.method(globalThis, "fetch", async () => ({ ok: true, text: async () => "fixture feed" }));
   const news = await load("lib/briefing/news.ts", {
     ...f.mocks,
@@ -20,7 +22,9 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
       ] };
     } } },
     openai: { default: class {
+      constructor(options) { clientOptions.push(options); }
       chat = { completions: { create: async (request) => {
+        analysisRequests.push(request);
         const candidates = JSON.parse(request.messages.find((message) => message.role === "user").content);
         requests.push(candidates);
         return { choices: [{ message: { content: JSON.stringify({
@@ -34,10 +38,34 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
   });
   const result = await news.refreshNews();
   assert.equal(result.newStories, 1);
+  assert.equal(clientOptions[0].timeout, 90_000);
+  assert.equal(clientOptions[0].maxRetries, 2);
+  assert.equal(analysisRequests[0].model, "gpt-5-mini");
   assert.equal(requests[0].length, 1);
   assert.equal(f.stories[0].importance, 3, "below-threshold stories remain available for later settings changes");
   assert.equal((await news.refreshNews()).newStories, 0);
   assert.equal(requests.length, 1, "seen stories must not incur another analysis call");
+});
+
+test("an OpenAI request timeout is identified as an analysis timeout without exposing credentials", async (t) => {
+  const f = fixture();
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "fake-test-key";
+  t.after(() => previousKey === undefined ? delete process.env.OPENAI_API_KEY : process.env.OPENAI_API_KEY = previousKey);
+
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, text: async () => "fixture feed" }));
+  const news = await load("lib/briefing/news.ts", {
+    ...f.mocks,
+    "rss-parser": { default: class { async parseString() {
+      return { items: [{ title: "New story", link: "https://example.test/new-story" }] };
+    } } },
+    openai: { default: class {
+      constructor(options) { assert.equal(options.timeout, 90_000); }
+      chat = { completions: { create: async () => { throw new Error("Request timed out."); } } };
+    } },
+  });
+
+  await assert.rejects(news.refreshNews(), /OpenAI news analysis request timed out after 90 seconds/);
 });
 
 test("a failed feed is recorded without blocking stories from healthy feeds", async (t) => {
