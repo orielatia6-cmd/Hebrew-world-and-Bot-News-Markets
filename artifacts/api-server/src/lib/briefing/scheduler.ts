@@ -97,7 +97,7 @@ async function dispatchPendingStories(force = false, breaking = false): Promise<
       "",
       ...group.map(storyBlock),
       "",
-      `תדרוכים: ${scheduleHebrew()}\nלהשהיה: /pause`,
+      
     ].join("\n\n");
 
     if (body.length > 3_900) {
