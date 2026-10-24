@@ -20,11 +20,24 @@ test("hourly digest schedule covers 24 Israel-time hours across daylight saving"
   assert.equal(new Set(summer).size, 24);
   assert.equal(new Set(winter).size, 24);
 });
-test("no replay of completed slots, bounded recovery, no overnight catchup", () => {
+test("late runs recover the current Israel-hour slot without replaying completed slots", () => {
   assert.equal(digestSlot(new Date("2026-07-01T04:01:00Z"), new Date("2026-07-01T04:00:00Z")), null);
   assert.ok(digestSlot(new Date("2026-07-01T04:14:00Z"), null));
-  assert.equal(digestSlot(new Date("2026-07-01T04:15:00Z"), null), null);
-  assert.equal(digestSlot(new Date("2026-07-01T22:16:00Z"), null), null);
+  assert.equal(
+    digestSlot(new Date("2026-07-01T04:50:00Z"), null)?.toISOString(),
+    "2026-07-01T04:00:00.000Z",
+    "a delayed run can still deliver this hour's digest",
+  );
+  assert.equal(
+    digestSlot(new Date("2026-07-01T04:50:00Z"), new Date("2026-07-01T04:00:00Z")),
+    null,
+    "a completed hour is never delivered twice",
+  );
+  assert.equal(
+    digestSlot(new Date("2026-07-01T22:16:00Z"), new Date("2026-07-01T21:00:00Z"))?.toISOString(),
+    "2026-07-01T22:00:00.000Z",
+    "overnight hours remain scheduled, with no backfill of earlier hours",
+  );
 });
 test("headline duplicate detection preserves different numbers", () => {
   assert.ok(similarHeadline("Nvidia launches new AI chips - BBC", "NVIDIA launches new AI chips"));

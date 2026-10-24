@@ -19,7 +19,7 @@ export function digestSlot(now: Date, lastSent: Date | null): Date | null {
   }).formatToParts(now);
   const hour = Number(parts.find(p => p.type === "hour")?.value);
   const minute = Number(parts.find(p => p.type === "minute")?.value);
-  if (!israelDigestHours(now).includes(hour) || minute >= 15) return null;
+  if (!israelDigestHours(now).includes(hour)) return null;
   const slot = new Date(now.getTime() - minute * 60000 - now.getSeconds() * 1000 - now.getMilliseconds());
   return lastSent && lastSent >= slot ? null : slot;
 }

@@ -32,8 +32,9 @@ async function schedulerFixture(t) {
   return { ...scheduler, f, refreshes: () => refreshes };
 }
 
-test("scheduled slot sends at boundary, not before; only recent eligible undelivered stories", async (t) => {
+test("scheduled slot waits for its boundary after the prior slot; only recent eligible undelivered stories", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
+  f.settings.lastProcessedDigestSlotAt = new Date("2026-07-01T04:00:00Z");
   f.stories.push(
     story(1, 3),
     { ...story(2, 4), title: "כותרת 2" },
