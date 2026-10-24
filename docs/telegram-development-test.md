@@ -2,6 +2,10 @@
 
 This opt-in process uses the existing Telegram secret internally. It does not import the database, scheduler, RSS, or OpenAI modules and does not save chat ownership or settings.
 
+## Production owner pairing
+
+Normal bot commands are accepted only from the chat ID already saved in `briefing_settings.telegram_chat_id`. If no owner has been saved yet, set `TELEGRAM_OWNER_CHAT_ID` as a Production secret to the owner's private Telegram chat ID before starting the bot. `/start` can then pair only that configured owner; the first person who messages the bot is never trusted automatically.
+
 ## Before starting
 
 Confirm that no production deployment or other host is polling this bot. Do not publish while the test runs. The ordinary development API workflow does not poll.

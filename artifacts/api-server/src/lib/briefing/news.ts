@@ -144,7 +144,9 @@ const feeds: FeedDefinition[] = [
   },
 ];
 
-const parser = new Parser();
+const parser = new Parser({
+  customFields: { item: [["source", "source"]] },
+});
 const trackedTickers = new Set([
   "SPX",
   "NDX",
@@ -289,34 +291,48 @@ async function directArticleLink(link: string): Promise<string> {
   } catch {
     return link;
   }
-  if (parsed.protocol !== "https:" || parsed.hostname !== "news.google.com") return link;
-
-  try {
-    // Inspect only the redirect response. Never fetch an RSS-provided destination,
-    // which avoids turning link resolution into a server-side request proxy.
-    const response = await fetch(link, {
-      method: "HEAD",
-      redirect: "manual",
-      signal: AbortSignal.timeout(5_000),
-    });
-    const location = response.headers?.get("location");
-    if (!location) return link;
-    const destination = new URL(location, link);
-    if (
-      destination.protocol !== "https:" ||
-      destination.username ||
-      destination.password ||
-      destination.hostname === "news.google.com" ||
-      destination.hostname === "localhost" ||
-      destination.hostname.endsWith(".local") ||
-      isIP(destination.hostname.replace(/^\[|\]$/g, "")) !== 0
-    ) {
-      return link;
-    }
-    return destination.href;
-  } catch {
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== "news.google.com" ||
+    parsed.username ||
+    parsed.password
+  ) {
     return link;
   }
+
+  let current = link;
+  const visited = new Set([link]);
+  for (let hop = 0; hop < 4; hop += 1) {
+    try {
+      // Contact only Google News. Inspect redirect headers without fetching an
+      // RSS-provided publisher URL, so this cannot become an SSRF proxy.
+      const response = await fetch(current, {
+        method: "HEAD",
+        redirect: "manual",
+        signal: AbortSignal.timeout(5_000),
+      });
+      const location = response.headers?.get("location");
+      if (!location) return link;
+      const destination = new URL(location, current);
+      if (
+        destination.protocol !== "https:" ||
+        destination.username ||
+        destination.password ||
+        destination.hostname === "localhost" ||
+        destination.hostname.endsWith(".local") ||
+        isIP(destination.hostname.replace(/^\[|\]$/g, "")) !== 0
+      ) {
+        return link;
+      }
+      if (destination.hostname !== "news.google.com") return destination.href;
+      if (visited.has(destination.href)) return link;
+      visited.add(destination.href);
+      current = destination.href;
+    } catch {
+      return link;
+    }
+  }
+  return link;
 }
 
 async function fetchFeed(feed: FeedDefinition): Promise<Candidate[]> {

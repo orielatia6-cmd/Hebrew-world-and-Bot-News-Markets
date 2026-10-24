@@ -5,34 +5,61 @@ import { fixture, load } from "./harness.mjs";
 async function telegramFixture(t) {
   const f = fixture();
   const oldToken = process.env.TELEGRAM_BOT_TOKEN;
+  const oldOwnerChatId = process.env.TELEGRAM_OWNER_CHAT_ID;
   process.env.TELEGRAM_BOT_TOKEN = "fake-test-token";
-  t.after(() => oldToken === undefined ? delete process.env.TELEGRAM_BOT_TOKEN : process.env.TELEGRAM_BOT_TOKEN = oldToken);
+  delete process.env.TELEGRAM_OWNER_CHAT_ID;
+  t.after(() => {
+    if (oldToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = oldToken;
+    if (oldOwnerChatId === undefined) delete process.env.TELEGRAM_OWNER_CHAT_ID;
+    else process.env.TELEGRAM_OWNER_CHAT_ID = oldOwnerChatId;
+  });
   const timeouts = [];
   let refreshes = 0;
-  t.mock.method(AbortSignal, "timeout", (ms) => { timeouts.push(ms); return new AbortController().signal; });
-  const telegramUpdates = [];
-  t.mock.method(globalThis, "fetch", async (_url, options) => {
+  let refreshImplementation = async () => ({ analyzed: 1, newStories: 1 });
+  let fetchImplementation = async (_url, options) => {
     if (options.body) f.sent.push(JSON.parse(options.body));
     return { ok: true, json: async () => ({ ok: true, result: _url.includes("getUpdates") ? telegramUpdates : [] }) };
-  });
+  };
+  t.mock.method(AbortSignal, "timeout", (ms) => { timeouts.push(ms); return new AbortController().signal; });
+  const telegramUpdates = [];
+  t.mock.method(globalThis, "fetch", (...args) => fetchImplementation(...args));
   const telegram = await load("lib/briefing/telegram.ts", {
     ...f.mocks,
-    scheduler: { refreshAndDeliver: async () => {
+    scheduler: { refreshAndDeliver: () => {
       refreshes++;
-      return { analyzed: 1, newStories: 1 };
+      return refreshImplementation();
     } },
   }, { "telegram.ts": ["handleUpdate", "telegramCall"] });
   const update = (id, text, type = "private") => telegram.handleUpdate({
     update_id: 1, message: { text, chat: { id, type } },
   });
-  return { f, telegram, update, timeouts, refreshes: () => refreshes, telegramUpdates };
+  return {
+    f, telegram, update, timeouts, refreshes: () => refreshes, telegramUpdates,
+    setRefreshImplementation: (implementation) => { refreshImplementation = implementation; },
+    setFetchImplementation: (implementation) => { fetchImplementation = implementation; },
+  };
 }
 
-test("only the first private chat pairs; non-owner commands cannot modify settings", async (t) => {
+test("only a preconfigured owner can pair; unknown chats are ignored without replies", async (t) => {
   const { f, update } = await telegramFixture(t);
   f.settings.telegramChatId = null;
   await update(101, "/start", "group");
   assert.equal(f.settings.telegramChatId, null);
+  await update(202, "/start");
+  assert.equal(f.settings.telegramChatId, null);
+  assert.equal(f.sent.length, 0, "an unverified first chat must not claim the bot or receive a reply");
+
+  process.env.TELEGRAM_OWNER_CHAT_ID = "101-not-valid";
+  await update(101, "/start");
+  assert.equal(f.settings.telegramChatId, null, "invalid owner configuration must fail closed");
+  assert.equal(f.sent.length, 0);
+
+  process.env.TELEGRAM_OWNER_CHAT_ID = "101";
+  await update(202, "/start");
+  assert.equal(f.settings.telegramChatId, null);
+  assert.equal(f.sent.length, 0, "non-owner chats must not receive Telegram messages");
+
   await update(101, "/start");
   assert.equal(f.settings.telegramChatId, "101");
   assert.match(f.sent.at(-1).text, /Briefline מחובר/);
@@ -41,6 +68,7 @@ test("only the first private chat pairs; non-owner commands cannot modify settin
   assert.match(f.sent.at(-1).text, /תדרוכים:/);
   assert.match(f.sent.at(-1).text, /בדיקת מקורות: כל 15 דקות/);
   assert.match(f.sent.at(-1).text, /התראות דחופות: נשלחות בנפרד/);
+  const sentBeforeOutsiderCommands = f.sent.length;
   await update(202, "/start");
   assert.equal(f.settings.telegramChatId, "101");
   await update(202, "/pause");
@@ -49,6 +77,7 @@ test("only the first private chat pairs; non-owner commands cannot modify settin
   assert.equal(f.settings.enabled, true);
   assert.equal(f.settings.deliveryIntervalMinutes, 60);
   assert.equal(f.settings.minImportance, 4);
+  assert.equal(f.sent.length, sentBeforeOutsiderCommands, "outsiders must not receive command replies");
   await update(101, "/pause");
   assert.equal(f.settings.enabled, false);
   await update(202, "/resume");
@@ -88,6 +117,7 @@ test("manual refresh throttles for five minutes, rejects outsiders, and resets a
   await update(202, "/refresh");
   assert.equal(refreshes(), 0);
   await update(101, "/refresh");
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(refreshes(), 1);
   assert.ok(f.sent.some((message) => message.text.includes("הבדיקה הושלמה")));
   t.mock.timers.setTime(1_299_999);
@@ -95,7 +125,44 @@ test("manual refresh throttles for five minutes, rejects outsiders, and resets a
   assert.equal(refreshes(), 1);
   t.mock.timers.setTime(1_300_000);
   await update(101, "/refresh");
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(refreshes(), 2);
+});
+
+test("manual refresh acknowledges immediately and does not block later commands", async (t) => {
+  const { f, update, refreshes, setRefreshImplementation } = await telegramFixture(t);
+  let finishRefresh;
+  setRefreshImplementation(() => new Promise((resolve) => { finishRefresh = resolve; }));
+
+  const refreshCommand = update(101, "/refresh");
+  const returned = await Promise.race([
+    refreshCommand.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 100)),
+  ]);
+  assert.equal(returned, true, "the command handler must return after the acknowledgement, not after analysis");
+  assert.match(f.sent.at(-1).text, /מתחיל בדיקת חדשות ידנית/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(refreshes(), 1);
+
+  await update(101, "/status");
+  assert.match(f.sent.at(-1).text, /מצב העדכונים/);
+
+  finishRefresh({ analyzed: 1, newStories: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(f.sent.some((message) => message.text.includes("הבדיקה הושלמה")));
+});
+
+test("a failed command reply does not consume the Telegram update offset", async (t) => {
+  const { f, telegram, telegramUpdates, setFetchImplementation } = await telegramFixture(t);
+  telegramUpdates.push({ update_id: 812, message: { text: "/status", chat: { id: 101, type: "private" } } });
+  setFetchImplementation(async (url) => {
+    if (url.includes("getUpdates")) {
+      return { ok: true, json: async () => ({ ok: true, result: telegramUpdates }) };
+    }
+    return { ok: false, json: async () => ({ ok: false, description: "delivery failed" }) };
+  });
+  await assert.rejects(telegram.pollTelegramUpdatesOnce(), /delivery failed/);
+  assert.equal(f.settings.lastTelegramUpdateId, 0);
 });
 
 test("long polling has a longer timeout than Telegram's wait; failed sends throw", async (t) => {

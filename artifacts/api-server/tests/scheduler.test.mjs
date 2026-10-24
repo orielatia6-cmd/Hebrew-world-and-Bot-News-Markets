@@ -119,6 +119,21 @@ test("each story is one concise Hebrew message with factual sections and a click
   assert.doesNotMatch(financialMessage.text, /המלצה|קנייה|מכירה/);
 });
 
+test("Google News aggregator links are labeled as aggregators, not direct publisher articles", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  f.stories.push({
+    ...story(1, 5),
+    sourceName: "Reuters",
+    url: "https://news.google.com/rss/articles/example-id",
+  });
+
+  assert.equal(await dispatchPendingStories(), 1);
+  assert.match(
+    f.sent[0].text,
+    /<a href="https:\/\/news\.google\.com\/rss\/articles\/example-id">מקור: Reuters · דרך Google News<\/a>/,
+  );
+});
+
 test("paused or unpaired delivery does not consume stories; resume delivers", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   f.stories.push(story(1));

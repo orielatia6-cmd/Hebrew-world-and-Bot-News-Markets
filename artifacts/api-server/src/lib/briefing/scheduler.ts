@@ -42,6 +42,12 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function sourceLinkLabel(sourceName: string, sourceUrl: URL): string {
+  if (sourceUrl.hostname !== "news.google.com") return sourceName;
+  if (/google news/i.test(sourceName)) return "Google News";
+  return `${sourceName} · דרך Google News`;
+}
+
 function formatStoryMessage(
   story: typeof briefingStoriesTable.$inferSelect,
 ): string {
@@ -67,7 +73,7 @@ function formatStoryMessage(
     "",
     `📈 <b>השפעה אפשרית:</b>\n${escapeHtml(story.marketImpact)}${tickers}`,
     "",
-    `🔗 <a href="${escapeHtml(sourceUrl.toString())}">מקור: ${escapeHtml(story.sourceName)}</a>`,
+    `🔗 <a href="${escapeHtml(sourceUrl.toString())}">מקור: ${escapeHtml(sourceLinkLabel(story.sourceName, sourceUrl))}</a>`,
   ].join("\n");
 
   return text;

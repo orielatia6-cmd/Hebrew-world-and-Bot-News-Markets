@@ -9,8 +9,9 @@ pnpm --filter @workspace/api-server test
 Uses Node's built-in test runner and the existing esbuild dependency. Tests bundle
 the actual implementation while substituting database, RSS, OpenAI and Telegram
 I/O. No real messages are sent, no database is changed, and no paid API is called.
-Coverage includes Telegram private-chat ownership, owner-only commands,
-five-minute manual-refresh throttling, pause/resume, long-poll timeout selection,
+Coverage includes verified Telegram owner pairing, owner-only commands,
+non-blocking manual refresh, five-minute refresh throttling, retryable failed command
+replies, pause/resume, long-poll timeout selection,
 feed URL deduplication and
 already-analyzed stories, Hebrew analysis validation, importance boundaries,
 delivery cadence, refresh cadence, and successful/failed delivery state.

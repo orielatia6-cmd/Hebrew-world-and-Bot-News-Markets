@@ -10,13 +10,16 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
   const requests = [];
   const clientOptions = [];
   const analysisRequests = [];
+  const parserOptions = [];
   t.mock.method(globalThis, "fetch", async () => ({ ok: true, text: async () => "fixture feed" }));
   const news = await load("lib/briefing/news.ts", {
     ...f.mocks,
-    "rss-parser": { default: class { async parseString() {
+    "rss-parser": { default: class {
+      constructor(options) { parserOptions.push(options); }
+      async parseString() {
       return { items: [
-        { title: "News", link: "https://example.test/news#one", isoDate: new Date().toISOString() },
-        { title: "News again", link: "https://example.test/news#two", isoDate: new Date().toISOString() },
+        { title: "News", link: "https://example.test/news#one", isoDate: new Date().toISOString(), source: "Reuters" },
+        { title: "News again", link: "https://example.test/news#two", isoDate: new Date().toISOString(), source: "Reuters" },
         { title: "Invalid", link: "javascript:bad" },
         { title: "Old", link: "https://example.test/old", isoDate: "2000-01-01" },
       ] };
@@ -41,8 +44,11 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
   assert.equal(result.newStories, 1);
   assert.equal(clientOptions[0].timeout, 90_000);
   assert.equal(clientOptions[0].maxRetries, 2);
+  assert.deepEqual(parserOptions[0].customFields.item, [["source", "source"]]);
   assert.equal(analysisRequests[0].model, "gpt-5-mini");
   assert.equal(requests[0].length, 1);
+  assert.equal(requests[0][0].source, "Reuters");
+  assert.equal(f.stories[0].sourceName, "Reuters");
   assert.equal(f.stories[0].importance, 3, "below-threshold stories remain available for later settings changes");
   assert.equal((await news.refreshNews()).newStories, 0);
   assert.equal(requests.length, 1, "seen stories must not incur another analysis call");
@@ -262,18 +268,37 @@ test("a previously reported event is suppressed unless the analysis marks a mate
 test("Google News links resolve only to safe direct HTTPS article links", async (t) => {
   const f = fixture();
   const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["directArticleLink"] });
-  let destination = "https://www.reuters.com/world/example-story";
+  let destinations = ["https://www.reuters.com/world/example-story"];
+  let fetchIndex = 0;
   t.mock.method(globalThis, "fetch", async () => ({
-    headers: { get: () => destination },
+    headers: { get: () => destinations[fetchIndex++] ?? null },
   }));
   assert.equal(
     await news.directArticleLink("https://news.google.com/rss/articles/abc"),
     "https://www.reuters.com/world/example-story",
   );
-  destination = "http://127.0.0.1/admin";
+  destinations = [
+    "https://news.google.com/rss/articles/redirected",
+    "https://www.reuters.com/world/multi-hop-story",
+  ];
+  fetchIndex = 0;
+  assert.equal(
+    await news.directArticleLink("https://news.google.com/rss/articles/abc"),
+    "https://www.reuters.com/world/multi-hop-story",
+    "follow only Google News redirect hops and return the verified HTTPS publisher destination",
+  );
+  destinations = ["http://127.0.0.1/admin"];
+  fetchIndex = 0;
   assert.equal(
     await news.directArticleLink("https://news.google.com/rss/articles/abc"),
     "https://news.google.com/rss/articles/abc",
+  );
+  destinations = ["https://news.google.com/rss/articles/redirected", null];
+  fetchIndex = 0;
+  assert.equal(
+    await news.directArticleLink("https://news.google.com/rss/articles/abc"),
+    "https://news.google.com/rss/articles/abc",
+    "keep the Google News URL when its redirect does not reach a verified publisher article",
   );
 });
 

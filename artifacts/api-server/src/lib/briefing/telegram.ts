@@ -27,6 +27,11 @@ function botToken(): string | null {
   return process.env.TELEGRAM_BOT_TOKEN || null;
 }
 
+function configuredOwnerChatId(): string | null {
+  const chatId = process.env.TELEGRAM_OWNER_CHAT_ID?.trim();
+  return chatId && /^[1-9]\d*$/.test(chatId) ? chatId : null;
+}
+
 async function telegramCall<T>(
   method: string,
   body?: Record<string, unknown>,
@@ -81,6 +86,7 @@ async function sendHebrew(chatId: string, text: string): Promise<void> {
   } catch (error) {
     const reason = redactBotToken(error instanceof Error ? error.message : "Unknown Telegram error");
     logger.warn({ reason }, "Telegram message could not be delivered");
+    throw error;
   }
 }
 
@@ -113,41 +119,26 @@ function welcomeText(): string {
   ].join("\n");
 }
 
-async function handleStart(chatId: string): Promise<void> {
-  const settings = await ensureBriefingSettings();
-  if (settings.telegramChatId && settings.telegramChatId !== chatId) {
-    await sendHebrew(
-      chatId,
-      "הבוט כבר מחובר לחשבון אחר ולא ניתן לחבר צ׳אט נוסף.",
-    );
-    return;
-  }
-
-  if (!settings.telegramChatId) {
-    await db
-      .update(briefingSettingsTable)
-      .set({ telegramChatId: chatId })
-      .where(eq(briefingSettingsTable.id, 1));
-  }
-
-  await sendHebrew(chatId, welcomeText());
-}
-
 let lastManualRefreshAt = 0;
+let manualRefreshInProgress = false;
 
 async function handleOwnerCommand(
   chatId: string,
   command: string,
   argument?: string,
 ): Promise<void> {
-  if (command === "/start") {
-    await handleStart(chatId);
-    return;
-  }
-
   const settings = await ensureBriefingSettings();
-  if (settings.telegramChatId !== chatId) {
-    await sendHebrew(chatId, "הבוט הפרטי הזה כבר מחובר לבעלים שלו.");
+  const ownerChatId = settings.telegramChatId ?? configuredOwnerChatId();
+  if (!ownerChatId || ownerChatId !== chatId) return;
+
+  if (command === "/start") {
+    if (!settings.telegramChatId) {
+      await db
+        .update(briefingSettingsTable)
+        .set({ telegramChatId: chatId })
+        .where(eq(briefingSettingsTable.id, 1));
+    }
+    await sendHebrew(chatId, welcomeText());
     return;
   }
 
@@ -213,24 +204,42 @@ async function handleOwnerCommand(
 
   if (command === "/refresh") {
     const now = Date.now();
+    if (manualRefreshInProgress) {
+      await sendHebrew(chatId, "בדיקת חדשות ידנית כבר פועלת. הפקודות האחרות ממשיכות לפעול.");
+      return;
+    }
     if (now - lastManualRefreshAt < 5 * 60 * 1000) {
       await sendHebrew(chatId, "אפשר להפעיל בדיקה ידנית פעם בחמש דקות. העדכון האוטומטי ימשיך כרגיל.");
       return;
     }
-    lastManualRefreshAt = now;
     await sendHebrew(chatId, "מתחיל בדיקת חדשות ידנית. אשלח את הסיכום כשתסתיים.");
-    try {
-      const { refreshAndDeliver } = await import("./scheduler");
-      const result = await refreshAndDeliver();
-      await sendHebrew(
-        chatId,
-        `הבדיקה הושלמה. נותחו ${result.analyzed} סיפורים ונשמרו ${result.newStories} סיפורים חדשים.`,
-      );
-    } catch (error) {
-      const reason = redactBotToken(error instanceof Error ? error.message : "Unknown refresh error");
-      logger.warn({ reason }, "Manual Telegram news refresh failed");
-      await sendHebrew(chatId, "הבדיקה נכשלה. בדוק שהחיבור ל־OpenAI פעיל ונסה שוב מאוחר יותר.");
-    }
+    lastManualRefreshAt = now;
+    manualRefreshInProgress = true;
+    void (async () => {
+      try {
+        const { refreshAndDeliver } = await import("./scheduler");
+        const result = await refreshAndDeliver();
+        try {
+          await sendHebrew(
+            chatId,
+            `הבדיקה הושלמה. נותחו ${result.analyzed} סיפורים ונשמרו ${result.newStories} סיפורים חדשים.`,
+          );
+        } catch {
+          // The initial acknowledgement was delivered; do not misreport a
+          // failed completion notice as a failed refresh.
+        }
+      } catch (error) {
+        const reason = redactBotToken(error instanceof Error ? error.message : "Unknown refresh error");
+        logger.warn({ reason }, "Manual Telegram news refresh failed");
+        try {
+          await sendHebrew(chatId, "הבדיקה נכשלה. בדוק שהחיבור ל־OpenAI פעיל ונסה שוב מאוחר יותר.");
+        } catch {
+          // Delivery failure was already logged by sendHebrew.
+        }
+      } finally {
+        manualRefreshInProgress = false;
+      }
+    })();
     return;
   }
 
@@ -264,8 +273,8 @@ async function pollLoop(): Promise<void> {
       });
       const updates = await telegramCall<TelegramUpdate[]>(`getUpdates?${params.toString()}`);
       for (const update of updates) {
-        nextUpdateOffset = update.update_id + 1;
         await handleUpdate(update);
+        nextUpdateOffset = update.update_id + 1;
       }
     } catch (error) {
       const reason = redactBotToken(error instanceof Error ? error.message : "Unknown polling error");
