@@ -1,8 +1,8 @@
 name: Briefline Telegram digests
 
 on:
-  # These four UTC hours map to four Israel-time slots; the local clock
-  # shifts by one hour between standard time and daylight saving time.
+  # GitHub starts a run every 15 minutes; the application evaluates hourly
+  # digest slots and breaking-news alerts using Israel time. Starts may be delayed.
   schedule:
   - cron: "*/15 * * * *"
   workflow_dispatch:

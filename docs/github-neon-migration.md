@@ -1,9 +1,8 @@
 # GitHub Actions + Neon migration (manual setup required)
 
-This is a four-digest-per-day, best-effort design. GitHub runs at 05:05, 09:05,
-13:05, and 17:05 UTC. These map to 07:05, 11:05, 15:05, and 19:05 Israel time
-in winter, and 08:05, 12:05, 16:05, and 20:05 in summer. Starts can be delayed
-or skipped by GitHub, so this is not an on-time delivery SLA.
+GitHub starts the job every 15 minutes. The application checks 24 hourly digest
+slots in Israel time and checks for breaking stories on each run. GitHub can
+delay or skip scheduled starts, so this is best-effort and not an on-time SLA.
 
 ## Before enabling
 
@@ -23,16 +22,14 @@ or skipped by GitHub, so this is not an on-time delivery SLA.
 
 ## Schedule and behavior
 
-- The bot sends up to four digests per day, with send times shifting by one
-  hour between Israel winter and summer time. The workflow is triggered at
-  minute 05; GitHub can still delay or miss starts, and the digest window is
-  15 minutes.
-- Breaking stories are checked only when the scheduled job runs; they are not
-  instant. Feed scans also happen at those four executions, not every 15
-  minutes.
-- Telegram commands are checked in a bounded batch once per run. Responses may
-  be delayed by hours. The persisted update offset lets the next run continue
-  after the last successfully handled update.
+- The application preserves 24 hourly digest slots using `Asia/Jerusalem`,
+  including daylight-saving changes. A digest is sent only during its first
+  15-minute window; a delayed GitHub run can miss that slot.
+- Breaking stories and source refreshes are checked when each scheduled job
+  runs, nominally every 15 minutes; these alerts are not instant.
+- Telegram commands are checked in a bounded batch once per run. Responses
+  usually wait for the next run and may be delayed or skipped by GitHub. The
+  persisted update offset lets a later run continue after the last handled update.
 - `/pause`, `/resume`, `/importance`, `/status`, `/schedule`, `/test`, and
   `/refresh` remain available after their updates are polled. There is no
   continuously available HTTP server, health endpoint, or live polling loop.
