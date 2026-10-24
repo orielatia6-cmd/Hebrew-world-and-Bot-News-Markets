@@ -17,12 +17,6 @@ const TELEGRAM_SAFE_LENGTH = 3_800;
 let schedulerStarted = false;
 let tickInProgress = false;
 
-function categoryLabel(category: string): string {
-  if (category === "trump") return "טראמפ";
-  if (category === "markets") return "שווקים וטכנולוגיה";
-  return "עולם";
-}
-
 function sourceTrustRank(sourceName: string): number {
   return /\breuters\b|\bassociated press\b|\bbbc\b|\bbloomberg\b|\bfinancial times\b|\bwall street journal\b|\bfederal reserve\b|\bsec\b/i.test(
     sourceName,
@@ -48,6 +42,33 @@ function sourceLinkLabel(sourceName: string, sourceUrl: URL): string {
   return `${sourceName} · דרך Google News`;
 }
 
+function compactHeadline(title: string): string {
+  const words = title.trim().split(/\s+/u).filter(Boolean);
+  return words.length <= 12 ? words.join(" ") : `${words.slice(0, 11).join(" ")}…`;
+}
+
+function comparisonText(text: string): string {
+  return text
+    .toLocaleLowerCase("he")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function removeHeadlineEcho(title: string, summary: string): string {
+  const titleKey = comparisonText(title);
+  if (!titleKey) return summary.trim();
+  const sentences = summary.match(/[^.!?…]+[.!?…]?/gu) ?? [summary];
+  return sentences
+    .filter((sentence) => comparisonText(sentence) !== titleKey)
+    .join(" ")
+    .trim();
+}
+
+function ensureSentenceEnd(text: string): string {
+  const trimmed = text.trim();
+  return /[.!?…]$/u.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 function formatStoryMessage(
   story: typeof briefingStoriesTable.$inferSelect,
 ): string {
@@ -61,22 +82,29 @@ function formatStoryMessage(
     throw new Error(`Story ${story.id} has an unsupported source URL protocol.`);
   }
 
-  const tickers = story.tickers.length > 0
-    ? `\nסימולים רלוונטיים: ${escapeHtml(story.tickers.join(", "))}`
-    : "";
-  const text = [
-    `🔴 <b>${escapeHtml(categoryLabel(story.category))} · ${escapeHtml(story.title)}</b>`,
-    "",
-    `📰 <b>מה קרה:</b>\n${escapeHtml(story.summary)}`,
-    "",
-    `🧠 <b>למה זה חשוב:</b>\n${escapeHtml(story.whyItMatters)}`,
-    "",
-    `📈 <b>השפעה אפשרית:</b>\n${escapeHtml(story.marketImpact)}${tickers}`,
-    "",
-    `🔗 <a href="${escapeHtml(sourceUrl.toString())}">מקור: ${escapeHtml(sourceLinkLabel(story.sourceName, sourceUrl))}</a>`,
-  ].join("\n");
+  const summary = removeHeadlineEcho(story.title, story.summary);
+  const whyItMatters = ensureSentenceEnd(story.whyItMatters);
+  const marketImpact = ensureSentenceEnd(story.marketImpact);
+  const analysisSameAsImpact =
+    comparisonText(whyItMatters) === comparisonText(marketImpact);
+  let analysisLine = analysisSameAsImpact
+    ? `למה זה חשוב והשפעה אפשרית: ${escapeHtml(marketImpact)}`
+    : `למה זה חשוב: ${escapeHtml(whyItMatters)} השפעה אפשרית: ${escapeHtml(marketImpact)}`;
+  const analysisText = `${whyItMatters} ${marketImpact}`.toUpperCase();
+  const additionalTickers = story.tickers.filter(
+    (ticker) => !analysisText.includes(ticker.toUpperCase()),
+  );
+  if (additionalTickers.length > 0) {
+    analysisLine +=
+      ` (${escapeHtml(additionalTickers.join(", "))})`;
+  }
 
-  return text;
+  return [
+    `📰 <b>${escapeHtml(compactHeadline(story.title))}</b>`,
+    summary ? `מה קרה (עובדות): ${escapeHtml(summary)}` : "",
+    analysisLine,
+    `מקור: <a href="${escapeHtml(sourceUrl.toString())}">${escapeHtml(sourceLinkLabel(story.sourceName, sourceUrl))}</a>`,
+  ].filter(Boolean).join("\n");
 }
 
 type HtmlTag = { name: string; opening: string };

@@ -2,6 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, load, story } from "./harness.mjs";
 
+function visibleWordCount(text) {
+  return text
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&(?:amp|lt|gt|quot|#39);/g, " ")
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean).length;
+}
+
 function assertBalancedTelegramHtml(text) {
   const stack = [];
   const tags = text.match(/<\/?b>|<\/?a(?: href="[^"]*")?>/g) ?? [];
@@ -59,7 +68,7 @@ test("scheduled slot sends at boundary, not before; only recent eligible undeliv
     /מה קרה/.test(text) &&
     /למה זה חשוב/.test(text) &&
     /השפעה אפשרית/.test(text) &&
-    /<a href="https:\/\/example\.test\/\d+">מקור: BBC World<\/a>/.test(text) &&
+    /מקור: <a href="https:\/\/example\.test\/\d+">BBC World<\/a>/.test(text) &&
     !/NEWS|AI ANALYSIS|AI RECOMMENDATION|POTENTIAL MARKET IMPACT|🕒|שעון ישראל/.test(text),
   ));
   assert.equal(await dispatchPendingStories(), 0);
@@ -101,22 +110,49 @@ test("each story is one concise Hebrew message with factual sections and a click
   assert.equal(financialMessage.parseMode, "HTML");
   assert.equal(nonfinancialMessage.parseMode, "HTML");
   assert.doesNotMatch(financialMessage.text, /🕒|שעון ישראל|תדרוכים/);
+  assert.doesNotMatch(financialMessage.text, /\n\s*\n/);
+  assert.equal((financialMessage.text.match(/📰/gu) ?? []).length, 1);
+  assert.doesNotMatch(financialMessage.text, /🔴|🧠|📈|🔗/u);
+  assert.ok(visibleWordCount(financialMessage.text) <= 100);
+  assert.equal((financialMessage.text.match(/כותרת/g) ?? []).length, 1);
+  assert.doesNotMatch(financialMessage.text, /\.\s*;/);
 
-  const headings = ["מה קרה:", "למה זה חשוב:", "השפעה אפשרית:"];
+  const headings = ["מה קרה (עובדות):", "למה זה חשוב:", "השפעה אפשרית:"];
   let previousIndex = -1;
   for (const heading of headings) {
     const index = financialMessage.text.indexOf(heading);
     assert.ok(index > previousIndex, `${heading} should appear in the required order`);
     previousIndex = index;
   }
-  assert.match(financialMessage.text, /סימולים רלוונטיים: NVDA/);
+  assert.match(financialMessage.text, /השפעה אפשרית:.*\(NVDA\)/);
   assert.match(
     financialMessage.text,
-    /<a href="https:\/\/example\.test\/article\?one=1&amp;two=2">מקור: Reuters &amp; Desk<\/a>/,
+    /מקור: <a href="https:\/\/example\.test\/article\?one=1&amp;two=2">Reuters &amp; Desk<\/a>/,
   );
   assert.match(nonfinancialMessage.text, /השפעה אפשרית/);
   assert.match(nonfinancialMessage.text, /אין קשר ישיר לשוק על סמך המידע הזמין/);
   assert.doesNotMatch(financialMessage.text, /המלצה|קנייה|מכירה/);
+});
+
+test("long headlines are compacted and exact headline echoes are removed", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  const longHeadline =
+    "שווקים בארצות הברית מגיבים להחלטת מדיניות חדשה לקראת סוף השבוע לאחר דיווח כלכלי משמעותי";
+  f.stories.push({
+    ...story(1, 4),
+    title: longHeadline,
+    summary: `${longHeadline}. הדיווח כולל גם נתונים על היקף ההכנסות.`,
+  });
+
+  assert.equal(await dispatchPendingStories(), 1);
+  const message = f.sent[0].text;
+  const title = message.match(/<b>(.*?)<\/b>/u)?.[1] ?? "";
+  assert.ok(title.endsWith("…"));
+  assert.ok(title.split(/\s+/u).filter(Boolean).length <= 12);
+  assert.ok(message.includes("הדיווח כולל גם נתונים על היקף ההכנסות."));
+  assert.ok(!message.includes(longHeadline));
+  assert.doesNotMatch(message, /\n\s*\n/);
+  assertBalancedTelegramHtml(message);
 });
 
 test("Google News aggregator links are labeled as aggregators, not direct publisher articles", async (t) => {
@@ -130,7 +166,7 @@ test("Google News aggregator links are labeled as aggregators, not direct publis
   assert.equal(await dispatchPendingStories(), 1);
   assert.match(
     f.sent[0].text,
-    /<a href="https:\/\/news\.google\.com\/rss\/articles\/example-id">מקור: Reuters · דרך Google News<\/a>/,
+    /מקור: <a href="https:\/\/news\.google\.com\/rss\/articles\/example-id">Reuters · דרך Google News<\/a>/,
   );
 });
 
@@ -189,8 +225,7 @@ test("an empty scheduled digest is sent once per slot", async (t) => {
 test("oversized stories split into valid HTML messages without losing text", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   const longSummary = Array.from({ length: 500 }, (_, index) => `פרט${index}.`).join(" ");
-  const longTitle = Array.from({ length: 500 }, (_, index) => `כותרת${index}`).join(" ");
-  f.stories.push({ ...story(1), title: longTitle, summary: longSummary });
+  f.stories.push({ ...story(1), title: "כותרת בדיקה קצרה", summary: longSummary });
 
   assert.equal(await dispatchPendingStories(), 1);
   assert.ok(f.sent.length > 1, "the long story should be sent as multiple messages");
@@ -201,8 +236,8 @@ test("oversized stories split into valid HTML messages without losing text", asy
   const allText = f.sent.map(({ text }) => text).join("");
   for (let index = 0; index < 500; index += 1) {
     assert.ok(allText.includes(`פרט${index}.`), `missing source text token ${index}`);
-    assert.ok(allText.includes(`כותרת${index}`), `missing bold headline token ${index}`);
   }
+  assert.ok(allText.includes("<b>כותרת בדיקה קצרה</b>"));
   assert.ok(f.stories[0].deliveredAt instanceof Date);
 });
 

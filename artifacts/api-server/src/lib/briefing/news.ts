@@ -616,17 +616,23 @@ function parseAnalysis(value: unknown, candidates: Candidate[]): Analysis[] {
       typeof item.whyItMatters === "string" ? item.whyItMatters.trim() : "";
     const marketImpact =
       typeof item.marketImpact === "string" ? item.marketImpact.trim() : "";
+    const titleWordCount = title.split(/\s+/u).filter(Boolean).length;
+    const contentWordCount = `${title} ${summary} ${whyItMatters} ${marketImpact}`
+      .split(/\s+/u)
+      .filter(Boolean).length;
     if (
       ![title, summary, whyItMatters, marketImpact].every((text) =>
         /[\u0590-\u05FF]/.test(text),
-      )
+      ) ||
+      titleWordCount > 12 ||
+      contentWordCount > 80
     ) {
       return [];
     }
     const summarySentenceCount = summary
       .split(/(?<=[.!?…])\s+/u)
       .filter((sentence) => sentence.trim().length > 0).length;
-    if (summarySentenceCount < 2 || summarySentenceCount > 3) return [];
+    if (summarySentenceCount < 1 || summarySentenceCount > 2) return [];
 
     const candidate = candidateMap.get(sourceId);
     if (!candidate) return [];
@@ -716,6 +722,10 @@ async function analyzeCandidates(candidates: Candidate[]): Promise<Analysis[]> {
         {
           role: "system",
           content: "דירוג 5 שמור לחדשות מתפרצות חריגות ומבוססות בעלות השפעה רחבה: מלחמה או הסלמה משמעותית, החלטת ריבית מפתיעה, זעזוע מערכתי בשווקים או שינוי מדיניות מהותי. אל תדרג כ-5 שמועות, פרשנות, חזרה על הצהרה ישנה או תנודה שגרתית במניה. אם המידע חלקי, ציין זאת במפורש והורד את הדירוג.",
+        },
+        {
+          role: "system",
+          content: "כללי תמצות מחייבים: title הוא עד 12 מילים ואינו חוזר ב-summary. summary הוא משפט אחד או שניים של עובדות. whyItMatters ו-marketImpact הם משפטים קצרים, נפרדים ואינם חוזרים על אותו רעיון. שמור את ארבעת שדות התוכן יחד עד 80 מילים; השמט סיפור אם אי אפשר לתארו בקצרה ובדיוק. אין להוסיף כותרות, המלצות השקעה או עובדות שאינן במקור.",
         },
         {
           role: "user",
