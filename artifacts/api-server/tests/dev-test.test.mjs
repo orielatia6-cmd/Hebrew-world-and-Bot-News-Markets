@@ -37,6 +37,7 @@ test("temporary runner is isolated, restricted, and fails closed", async () => {
 
     process.env.TELEGRAM_TEST_OWNER_CHAT_ID = "42";
     const calls = [], sent = [];
+    let updatesRequest = 0;
     globalThis.fetch = async (url, options) => {
       const method = new URL(url).pathname.split("/").at(-1);
       calls.push(method);
@@ -46,27 +47,39 @@ test("temporary runner is isolated, restricted, and fails closed", async () => {
       if (method === "getWebhookInfo") result = { url: "" };
       if (method === "getUpdates") {
         const date = Math.floor(Date.now() / 1000) + 10;
-        result = [
-          { update_id: 1, message: { text: "/start", date, chat: { id: 99, type: "private" } } },
-          { update_id: 2, message: { text: "/start", date, chat: { id: 42, type: "group" } } },
-          { update_id: 3, message: { text: "/start", date, chat: { id: 42, type: "private" } } },
-          { update_id: 4, message: { text: "/test", date, chat: { id: 99, type: "private" } } },
-          { update_id: 5, message: { text: "/test", date, chat: { id: 42, type: "private" } } },
-          { update_id: 6, message: { text: "/refresh", date, chat: { id: 42, type: "private" } } },
-          { update_id: 7, message: { text: "/stoptest", date, chat: { id: 42, type: "private" } } },
-        ];
+        if (updatesRequest === 0) {
+          result = [{ update_id: 1, message: { text: "/start", date, chat: { id: 42, type: "private" } } }];
+        } else if (updatesRequest === 1) {
+          result = [];
+        } else {
+          result = [
+            { update_id: 2, message: { text: "/start", date, chat: { id: 99, type: "private" } } },
+            { update_id: 3, message: { text: "/start", date, chat: { id: 42, type: "group" } } },
+            { update_id: 4, message: { text: "/start", date, chat: { id: 42, type: "private" } } },
+            { update_id: 5, message: { text: "/test", date, chat: { id: 99, type: "private" } } },
+            { update_id: 6, message: { text: "/status", date, chat: { id: 42, type: "private" } } },
+            { update_id: 7, message: { text: "/test", date, chat: { id: 42, type: "private" } } },
+            { update_id: 8, message: { text: "/refresh", date, chat: { id: 42, type: "private" } } },
+            { update_id: 9, message: { text: "/stoptest", date, chat: { id: 42, type: "private" } } },
+          ];
+        }
+        updatesRequest++;
       }
       if (method === "sendMessage") sent.push({ chatId: body.chat_id, text: body.text });
       return new Response(JSON.stringify({ ok: true, result }), { status: 200 });
     };
     await runDevTest();
-    assert.equal(sent.length, 4);
+    assert.equal(sent.length, 6);
     assert.ok(sent.every(message => String(message.chatId) === "42"), "no other chat may receive a test reply");
-    assert.ok(sent[0].text.includes("אין צורך בקוד"));
-    assert.match(sent[0].text, /24 התדרוכים השעתיים/);
-    assert.equal(sent[1].text, testReply("/test"));
-    assert.equal(sent[2].text, testReply("/refresh"));
-    assert.equal(sent[3].text, testReply("/stoptest"));
+    assert.match(sent[0].text, /בדיקת Telegram זמנית/);
+    assert.ok(sent[1].text.includes("אין צורך בקוד"));
+    assert.match(sent[1].text, /24 התדרוכים השעתיים/);
+    assert.equal(sent[2].text, testReply("/status"));
+    assert.equal(sent[3].text, testReply("/test"));
+    assert.equal(sent[4].text, testReply("/refresh"));
+    assert.equal(sent[5].text, testReply("/stoptest"));
+    assert.equal(sent.filter(message => message.text.includes("בדיקת Telegram זמנית הופעלה")).length, 1);
+    assert.equal(updatesRequest, 3, "queued updates must be drained before command handling starts");
     assert.ok(calls.every(method => ["getMe", "getWebhookInfo", "getUpdates", "sendMessage"].includes(method)));
     globalThis.fetch = async (url) => {
       const method = new URL(url).pathname.split("/").at(-1);
@@ -79,7 +92,9 @@ test("temporary runner is isolated, restricted, and fails closed", async () => {
       if (method === "getUpdates") return new Response(JSON.stringify({ ok: false, error_code: 409 }), { status: 409 });
       return new Response(JSON.stringify({ ok: true, result: method === "getMe" ? { username: "Oriel_news_bot" } : { url: "" } }));
     };
+    const sendsBeforeConflict = sent.length;
     await assert.rejects(runDevTest(), /polling conflict/);
+    assert.equal(sent.length, sendsBeforeConflict, "a polling conflict must be detected before sending any test message");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalEnvironment === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalEnvironment;

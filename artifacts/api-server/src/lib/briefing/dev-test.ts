@@ -1,10 +1,11 @@
 import { acquirePollerLock } from "./poller-lock";
 
 export function testReply(command: string): string {
-  if (command === "/start") return "בדיקה זמנית של Briefline פעילה.\nאין צורך בקוד כניסה או באתר.\nשלח /test לבדיקת מסירה או /stoptest לסיום.\nבבדיקה זו אין איסוף חדשות, תדרוכים מתוזמנים או שימוש ב־OpenAI. לוח 24 התדרוכים השעתיים נשאר ללא שינוי.";
+  if (command === "/start") return "בדיקה זמנית של Briefline פעילה.\nאין צורך בקוד כניסה או באתר.\nשלח /status לבדיקת המצב, /test לבדיקת מסירה או /stoptest לסיום.\nבבדיקה זו אין איסוף חדשות, תדרוכים מתוזמנים או שימוש ב־OpenAI. לוח 24 התדרוכים השעתיים נשאר ללא שינוי.";
+  if (command === "/status") return "מצב בדיקה: פעילה לבעלים בלבד. איסוף חדשות, תדרוכים מתוזמנים ו־OpenAI כבויים. שלח /stoptest לסיום.";
   if (command === "/test") return "בדיקת מסירת הודעה הצליחה. זוהי הודעת בדיקה בלבד, ללא שימוש ב־OpenAI.";
   if (command === "/stoptest") return "הבדיקה הזמנית מסתיימת כעת. לא שונו ההגדרות או לוח 24 התדרוכים השעתיים.";
-  return "בבדיקה זמנית זמינות רק הפקודות /start, /test ו־/stoptest. חדשות ו־OpenAI כבויים.";
+  return "בבדיקה זמנית זמינות רק הפקודות /start, /status, /test ו־/stoptest. חדשות ו־OpenAI כבויים.";
 }
 
 export async function runDevTest(): Promise<void> {
@@ -21,7 +22,6 @@ export async function runDevTest(): Promise<void> {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   const timer = setTimeout(stop, 15 * 60 * 1000);
-  const started = Math.floor(Date.now() / 1000);
   let offset = 0;
   let stopping = false;
 
@@ -39,11 +39,31 @@ export async function runDevTest(): Promise<void> {
     return payload.result;
   }
 
+  async function discardQueuedUpdates(): Promise<void> {
+    for (let batch = 0; batch < 20; batch += 1) {
+      const updates = await call("getUpdates", {
+        offset,
+        timeout: 0,
+        allowed_updates: ["message"],
+      }) as Array<{ update_id: number }>;
+      if (updates.length === 0) return;
+      offset = updates[updates.length - 1].update_id + 1;
+    }
+    throw new Error("Too many queued updates. Test stopped safely before replying.");
+  }
+
   try {
     const bot = await call("getMe");
     if (bot.username !== "Oriel_news_bot") throw new Error("Unexpected bot identity. Test refused.");
     const webhook = await call("getWebhookInfo");
     if (webhook.url) throw new Error("An active webhook exists. Test refused without changing it.");
+    await discardQueuedUpdates();
+    const started = Math.floor(Date.now() / 1000);
+    await call("sendMessage", {
+      chat_id: ownerChatId,
+      text: "בדיקת Telegram זמנית הופעלה בחשבון הבעלים בלבד. שלח /start ואז /status כדי לאמת מענה. חדשות, תזמון ו־OpenAI כבויים.",
+    });
+    console.log("Telegram accepted one temporary startup test message for the configured owner.");
     console.log("Temporary Telegram-only test READY for the configured owner of @Oriel_news_bot. Auto-stop: 15 minutes. Stop: Ctrl+C or /stoptest.");
     console.log("Only the configured private owner chat can receive replies. No database, news, scheduler, or OpenAI modules are loaded. Old queued commands are ignored and acknowledged during this test.");
     while (!controller.signal.aborted && !stopping) {
@@ -59,7 +79,7 @@ export async function runDevTest(): Promise<void> {
           const command = message.text.trim().split(/\s+/)[0].split("@")[0].toLowerCase();
           if (command.startsWith("/")) {
             await call("sendMessage", { chat_id: ownerChatId, text: testReply(command) });
-            console.log(`Telegram accepted temporary ${["/start", "/test", "/stoptest"].includes(command) ? command : "disabled-command"} reply.`);
+            console.log(`Telegram accepted temporary ${["/start", "/status", "/test", "/stoptest"].includes(command) ? command : "disabled-command"} reply.`);
             if (command === "/stoptest") stopping = true;
           }
         }
@@ -70,7 +90,7 @@ export async function runDevTest(): Promise<void> {
   } catch (error) {
     if (!controller.signal.aborted) {
       // Never emit fetch errors or stack traces: they may contain token-bearing URLs.
-      const safe = error instanceof Error && /^(Telegram polling conflict|Telegram request failed|Unexpected bot identity|An active webhook)/.test(error.message);
+      const safe = error instanceof Error && /^(Telegram polling conflict|Telegram request failed|Unexpected bot identity|An active webhook|Too many queued updates)/.test(error.message);
       throw new Error(safe ? (error as Error).message : "Temporary Telegram test failed safely. No raw network details logged.");
     }
   } finally {

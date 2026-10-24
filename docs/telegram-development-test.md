@@ -14,7 +14,7 @@ Set `TELEGRAM_TEST_OWNER_CHAT_ID` in the Development secrets to the existing own
 
 The runner refuses production mode, a different bot identity, an active webhook, or a local polling lock. It stops on Telegram conflict errors instead of retrying. A local lock cannot prevent an unknown remote host from using the token.
 
-Only fresh private updates from the configured owner chat receive replies. Other users and groups never receive a test message. Old queued commands and unsupported commands are ignored and acknowledged, not executed.
+The runner first drains queued updates without replying, then sends one startup test message to the configured owner. Only fresh private updates from that owner receive replies. Other users and groups never receive a test message. Supported commands are `/start`, `/status`, `/test`, and `/stoptest`; news, scheduling, database access, and OpenAI remain disabled.
 
 ## Start
 
@@ -24,7 +24,7 @@ In the Replit Shell at the project root:
 pnpm --filter @workspace/api-server run telegram:test
 ```
 
-Wait for `READY`. From the configured owner account, send `/start`, then `/test`. The welcome response explicitly says this is a temporary test with no website login. `/refresh`, `/resume`, and other commands cannot start news or AI work.
+Wait for `READY`. From the configured owner account, send `/start`, then `/status`. The responses are temporary test-only replies; `/refresh`, `/resume`, and other commands cannot start news or AI work.
 
 ## Stop
 
