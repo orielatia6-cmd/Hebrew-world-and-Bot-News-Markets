@@ -118,9 +118,19 @@ const feeds: FeedDefinition[] = [
     url: "https://news.google.com/rss/search?q=%28S%26P+500+OR+Nasdaq+OR+Wall+Street+OR+US+stocks%29+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
   },
   {
+    name: "Yahoo Finance — S&P 500",
+    category: "markets",
+    url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US",
+  },
+  {
     name: "Google News — Nvidia וטסלה",
     category: "markets",
     url: "https://news.google.com/rss/search?q=%28Nvidia+OR+Tesla+OR+NVDA+OR+TSLA%29+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+  },
+  {
+    name: "Yahoo Finance — מניות טכנולוגיה",
+    category: "markets",
+    url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=NVDA%2CTSLA%2CMSFT%2CGOOG%2CMETA&region=US&lang=en-US",
   },
   {
     name: "Google News — Google, Microsoft ו-Meta",
@@ -158,10 +168,15 @@ const trustedSourcePatterns = [
   /\bfinancial times\b|\bft\b/i,
   /\bwall street journal\b|\bwsj\b/i,
   /\bbloomberg\b/i,
-  /\bcnbc\b/i,
-  /\bnew york times\b|\bnyt\b/i,
   /\bfederal reserve\b/i,
   /\bsec\b/i,
+];
+
+const secondarySourcePatterns = [
+  /\bcnbc\b/i,
+  /\bnew york times\b|\bnyt\b/i,
+  /\bguardian\b/i,
+  /\byahoo finance\b/i,
 ];
 
 const relevancePatterns = [
@@ -182,7 +197,8 @@ function contentRevisionKey(title: string, articleContext: string): string {
 }
 
 function sourceCredibility(sourceName: string): number {
-  return trustedSourcePatterns.some((pattern) => pattern.test(sourceName)) ? 3 : 0;
+  if (trustedSourcePatterns.some((pattern) => pattern.test(sourceName))) return 3;
+  return secondarySourcePatterns.some((pattern) => pattern.test(sourceName)) ? 1 : 0;
 }
 
 function candidatePriority(candidate: Pick<Candidate, "title" | "articleContext" | "category" | "sourceName" | "publishedAt">, now = Date.now()): number {

@@ -46,8 +46,8 @@ Briefline is a Telegram-only Hebrew news bot for important world events, Donald 
 
 - The product is the Telegram bot, not a website dashboard.
 - All briefings, bot responses, and explanations should be in Hebrew.
-- Send eight daily digests at 07:00, 09:00, 11:00, 13:00, 15:00, 17:00, 19:00, 21:00 Asia/Jerusalem (DST-aware). Send an empty-news notice if needed.
-- Breaking alerts (importance 5/5, published within two hours) bypass digest timing, including overnight; RSS polling remains every 15 minutes.
+- Send a digest every hour, 24 hours a day, using Asia/Jerusalem time.
+- Breaking alerts (importance 5/5, published within two hours) bypass digest timing, including overnight; RSS polling remains every 15 minutes. No placeholder digest is sent when there are no important stories.
 - Do not change hosting or add paid services without asking. Duplicate URL and similar Hebrew headline protection applies; delivered alerts are excluded from digests.
 
 ## Gotchas

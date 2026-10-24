@@ -39,6 +39,8 @@ test("only the first private chat pairs; non-owner commands cannot modify settin
   await update(101, "/status");
   assert.match(f.sent.at(-1).text, /מצב העדכונים: פעילים/);
   assert.match(f.sent.at(-1).text, /תדרוכים:/);
+  assert.match(f.sent.at(-1).text, /בדיקת מקורות: כל 15 דקות/);
+  assert.match(f.sent.at(-1).text, /התראות דחופות: נשלחות בנפרד/);
   await update(202, "/start");
   assert.equal(f.settings.telegramChatId, "101");
   await update(202, "/pause");
@@ -60,11 +62,9 @@ test("legacy interval commands cannot change the 24-hourly schedule; importance 
   for (const input of ["15", "30", "60", "120", "360", "0", "bad", ""]) {
     await update(101, `/interval ${input}`);
     assert.equal(f.settings.deliveryIntervalMinutes, 60);
-    const schedule = f.sent.at(-1).text.match(/תדרוכים ביום: ([^\n]+)/)?.[1] ?? "";
-    assert.match(schedule, /שעון ישראל/);
-    const hours = schedule.match(/\d{2}:00/g) ?? [];
-    assert.equal(hours.length, 24);
-    assert.equal(new Set(hours).size, 24);
+    assert.match(f.sent.at(-1).text, /תדרוך חדשות בכל שעה, 24 שעות ביממה, לפי שעון ישראל/);
+    assert.match(f.sent.at(-1).text, /בדיקת חדשות כל 15 דקות/);
+    assert.match(f.sent.at(-1).text, /התראות דחופות נשלחות בנפרד/);
   }
   for (const importance of [3, 4, 5]) {
     await update(101, `/importance ${importance}`);

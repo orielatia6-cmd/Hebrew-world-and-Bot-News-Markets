@@ -28,18 +28,9 @@ function sourceTrustRank(sourceName: string): number {
     sourceName,
   )
     ? 2
-    : /\bcnbc\b|\bnew york times\b|\bguardian\b/i.test(sourceName)
+    : /\bcnbc\b|\bnew york times\b|\bguardian\b|\byahoo finance\b/i.test(sourceName)
       ? 1
       : 0;
-}
-
-function formatPublishedAt(value: Date | null): string {
-  if (!value) return "מועד הפרסום לא זמין";
-  return new Intl.DateTimeFormat("he-IL", {
-    timeZone: "Asia/Jerusalem",
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(value);
 }
 
 function escapeHtml(value: string): string {
@@ -49,33 +40,6 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-function isMarketRelated(story: typeof briefingStoriesTable.$inferSelect): boolean {
-  if (story.category === "markets" || story.tickers.length > 0) return true;
-  if (/(?:אין|ללא)\s+(?:קשר|השפעה)\s+(?:ישיר(?:ה)?\s+)?לשוק|לא צפויה השפעה ישירה על השוק/u.test(story.marketImpact)) {
-    return false;
-  }
-  return /שוק|מניות|מדד|מדדים|סקטור|ענף|תשואות|אג"ח|ריבית|נפט|דולר|מטבע|בורסה|nasdaq|s&p|dow|nvidia|tesla|semiconductor|שבבים/u.test(
-    story.marketImpact,
-  );
-}
-
-function recommendationForStory(story: typeof briefingStoriesTable.$inferSelect): string {
-  if (!isMarketRelated(story)) {
-    return `לעקוב אחר עדכונים מאומתים בנושא אצל ${story.sourceName}, ולבדוק אם פרטים חדשים משנים את התמונה.`;
-  }
-
-  const assets = story.tickers.length > 0
-    ? `לעקוב אחר תגובת ${story.tickers.join(", ")}`
-    : "לעקוב אחר תגובת הנכסים והמדדים שמוזכרים בניתוח";
-  const bullish = story.sentiment === "negative"
-    ? "יתפרסמו עדכונים מאומתים שיצמצמו את הסיכון המתואר."
-    : "יתפרסמו עדכונים מאומתים שיחזקו את ההשפעה החיובית שתוארה.";
-  const bearish = story.sentiment === "positive"
-    ? "יתפרסמו עובדות חדשות שיחלישו את ההנחה החיובית."
-    : "יתפרסמו עדכונים מאומתים שיחזקו את הסיכון או את ההשפעה השלילית שתוארה.";
-  return `${assets} והודעת ההמשך בנושא. שורי: אם ${bullish} דובי: אם ${bearish} לא ודאי: אם המידע יישאר חלקי או שהתגובה תהיה מעורבת. זו מסגרת למעקב, לא הוראת קנייה או מכירה.`;
 }
 
 function formatStoryMessage(
@@ -97,15 +61,13 @@ function formatStoryMessage(
   const text = [
     `🔴 <b>${escapeHtml(categoryLabel(story.category))} · ${escapeHtml(story.title)}</b>`,
     "",
-    `📰 <b>NEWS:</b>\n${escapeHtml(story.summary)}`,
+    `📰 <b>מה קרה:</b>\n${escapeHtml(story.summary)}`,
     "",
-    `🧠 <b>AI ANALYSIS:</b>\n${escapeHtml(story.whyItMatters)}`,
+    `🧠 <b>למה זה חשוב:</b>\n${escapeHtml(story.whyItMatters)}`,
     "",
-    `📈 <b>AI RECOMMENDATION:</b>\n${escapeHtml(recommendationForStory(story))}`,
+    `📈 <b>השפעה אפשרית:</b>\n${escapeHtml(story.marketImpact)}${tickers}`,
     "",
-    `🎯 <b>POTENTIAL MARKET IMPACT:</b>\n${escapeHtml(story.marketImpact)}${tickers}`,
-    "",
-    `🕒 ${formatPublishedAt(story.publishedAt)} · 🔗 <a href="${escapeHtml(sourceUrl.toString())}">${escapeHtml(story.sourceName)}</a>`,
+    `🔗 <a href="${escapeHtml(sourceUrl.toString())}">מקור: ${escapeHtml(story.sourceName)}</a>`,
   ].join("\n");
 
   return text;

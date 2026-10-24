@@ -56,17 +56,16 @@ test("scheduled slot sends at boundary, not before; only recent eligible undeliv
   assert.match(f.sent[1].text, /כותרת 2/);
   assert.ok(f.sent.every(({ text, parseMode }) =>
     parseMode === "HTML" &&
-    /NEWS/.test(text) &&
-    /AI ANALYSIS/.test(text) &&
-    /AI RECOMMENDATION/.test(text) &&
-    /POTENTIAL MARKET IMPACT/.test(text) &&
-    /🕒/.test(text) &&
-    /<a href="https:\/\/example\.test\/\d+">BBC World<\/a>/.test(text),
+    /מה קרה/.test(text) &&
+    /למה זה חשוב/.test(text) &&
+    /השפעה אפשרית/.test(text) &&
+    /<a href="https:\/\/example\.test\/\d+">מקור: BBC World<\/a>/.test(text) &&
+    !/NEWS|AI ANALYSIS|AI RECOMMENDATION|POTENTIAL MARKET IMPACT|🕒|שעון ישראל/.test(text),
   ));
   assert.equal(await dispatchPendingStories(), 0);
 });
 
-test("each story is one complete formatted message with a practical market-aware recommendation", async (t) => {
+test("each story is one concise Hebrew message with factual sections and a clickable source", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   f.stories.push(
     {
@@ -101,27 +100,23 @@ test("each story is one complete formatted message with a practical market-aware
   assert.ok(nonfinancialMessage);
   assert.equal(financialMessage.parseMode, "HTML");
   assert.equal(nonfinancialMessage.parseMode, "HTML");
+  assert.doesNotMatch(financialMessage.text, /🕒|שעון ישראל|תדרוכים/);
 
-  const headings = [
-    "NEWS", "AI ANALYSIS", "AI RECOMMENDATION", "POTENTIAL MARKET IMPACT",
-  ];
+  const headings = ["מה קרה:", "למה זה חשוב:", "השפעה אפשרית:"];
   let previousIndex = -1;
   for (const heading of headings) {
     const index = financialMessage.text.indexOf(heading);
     assert.ok(index > previousIndex, `${heading} should appear in the required order`);
     previousIndex = index;
   }
-  assert.match(financialMessage.text, /שורי:/);
-  assert.match(financialMessage.text, /דובי:/);
-  assert.match(financialMessage.text, /לא ודאי:/);
   assert.match(financialMessage.text, /סימולים רלוונטיים: NVDA/);
   assert.match(
     financialMessage.text,
-    /<a href="https:\/\/example\.test\/article\?one=1&amp;two=2">Reuters &amp; Desk<\/a>/,
+    /<a href="https:\/\/example\.test\/article\?one=1&amp;two=2">מקור: Reuters &amp; Desk<\/a>/,
   );
-  assert.match(nonfinancialMessage.text, /לעקוב אחר עדכונים מאומתים בנושא/);
-  assert.doesNotMatch(nonfinancialMessage.text, /שורי:|דובי:|לא ודאי:/);
-  assert.equal((financialMessage.text.match(/NEWS/g) ?? []).length, 1);
+  assert.match(nonfinancialMessage.text, /השפעה אפשרית/);
+  assert.match(nonfinancialMessage.text, /אין קשר ישיר לשוק על סמך המידע הזמין/);
+  assert.doesNotMatch(financialMessage.text, /המלצה|קנייה|מכירה/);
 });
 
 test("paused or unpaired delivery does not consume stories; resume delivers", async (t) => {
@@ -218,8 +213,8 @@ test("breaking alerts can send overnight without consuming the next scheduled sl
   f.stories.push(story(1, 5), story(2, 4), { ...story(3, 5), publishedAt: new Date(Date.now() - 3 * 60 * 60_000) });
   assert.equal(await dispatchPendingStories(false, true), 1);
   assert.equal(f.settings.lastSentAt, null);
-  assert.match(f.sent[0].text, /NEWS/);
-  assert.match(f.sent[0].text, /AI RECOMMENDATION/);
+  assert.match(f.sent[0].text, /מה קרה/);
+  assert.match(f.sent[0].text, /השפעה אפשרית/);
   assert.equal(await dispatchPendingStories(false, true), 0);
   assert.equal(f.sent.length, 1);
   assert.equal(f.stories[1].deliveredAt, null);

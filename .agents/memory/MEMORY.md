@@ -1,1 +1,2 @@
 - [Bot operating requirements](bot-operating-requirements.md) — preserve the existing app and 24 hourly Hebrew digests; ask before hosting or paid-service changes.
+- [Yahoo Finance RSS quality](yahoo-finance-rss.md) — use Yahoo Finance feeds as secondary sources because items lack per-article publisher attribution.

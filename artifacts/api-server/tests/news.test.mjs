@@ -102,19 +102,23 @@ test("a failed feed is recorded without blocking stories from healthy feeds", as
 
   const result = await news.refreshNews();
   assert.equal(result.newStories, 3, "similar low-information headlines are collapsed within each category");
-  assert.equal(f.feedHealth.length, 9);
+  assert.equal(f.feedHealth.length, 11);
   const failed = f.feedHealth.find((source) => source.name === "BBC World");
   assert.equal(failed.lastError, "HTTP 503");
   assert.equal(failed.lastSuccessfulFetch, null);
   const healthy = f.feedHealth.filter((source) => source.name !== "BBC World");
-  assert.equal(healthy.length, 8);
+  assert.equal(healthy.length, 10);
   assert.ok(healthy.every((source) => source.lastSuccessfulFetch instanceof Date));
   assert.ok(healthy.every((source) => source.recentStoryCount === 1));
   const healthResponse = await news.getNewsSourceHealth();
-  assert.equal(healthResponse.length, 9);
+  assert.equal(healthResponse.length, 11);
   assert.equal(
     healthResponse.find((source) => source.name === "BBC World").lastError,
     "HTTP 503",
+  );
+  assert.deepEqual(
+    healthResponse.filter((source) => source.name.startsWith("Yahoo Finance")).map((source) => source.name),
+    ["Yahoo Finance — S&P 500", "Yahoo Finance — מניות טכנולוגיה"],
   );
 });
 
@@ -195,7 +199,13 @@ test("relevance ranking favors market-moving topics and reputable sources", asyn
     articleContext: "The cafe welcomed its first customers.",
     sourceName: "Local News", category: "world", publishedAt,
   };
+  const yahooStory = {
+    ...priorityStory,
+    sourceName: "Yahoo Finance — S&P 500",
+  };
   assert.ok(news.candidatePriority(priorityStory) > news.candidatePriority(lowRelevanceStory));
+  assert.ok(news.candidatePriority(priorityStory) > news.candidatePriority(yahooStory));
+  assert.ok(news.candidatePriority(yahooStory) > news.candidatePriority(lowRelevanceStory));
 });
 
 test("a previously reported event is suppressed unless the analysis marks a material update", async (t) => {

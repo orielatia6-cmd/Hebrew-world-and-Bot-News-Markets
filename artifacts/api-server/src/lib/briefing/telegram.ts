@@ -97,7 +97,9 @@ function welcomeText(): string {
   return [
     "Briefline מחובר. אשלח לך תדרוכי חדשות חשובים בעברית.",
     "",
-    `מקורות נבדקים בכל עדכון מתוזמן. ארבעה תדרוכים ביום: ${scheduleHebrew()}. ידיעות חריגות נבדקות גם בזמן התדרוכים.`,
+    "בדיקת חדשות כל 15 דקות.",
+    "תדרוך חדשות בכל שעה, 24 שעות ביממה, לפי שעון ישראל.",
+    "התראות דחופות נשלחות בנפרד כשמתגלה אירוע מתאים.",
     "",
     "פקודות:",
     "/status — מצב ותדירות",
@@ -179,7 +181,7 @@ async function handleOwnerCommand(
       : "";
     await sendHebrew(
       chatId,
-      `מצב העדכונים: ${state}\nתדרוכים: ${scheduleHebrew()}\nידיעות חריגות נבדקות בזמן התדרוכים המתוזמנים\nרף חשיבות: ${settings.minImportance}/5\nבדיקה אחרונה: ${formatTime(settings.lastCheckedAt)}${settings.lastSentAt ? `\nתדרוך אחרון: ${formatTime(settings.lastSentAt)}` : ""}${problem}`,
+      `מצב העדכונים: ${state}\nתדרוכים: ${scheduleHebrew()}\nבדיקת מקורות: כל 15 דקות\nהתראות דחופות: נשלחות בנפרד כשמתגלה אירוע מתאים\nרף חשיבות: ${settings.minImportance}/5\nבדיקה אחרונה: ${formatTime(settings.lastCheckedAt)}${settings.lastSentAt ? `\nתדרוך אחרון: ${formatTime(settings.lastSentAt)}` : ""}${problem}`,
     );
     return;
   }
