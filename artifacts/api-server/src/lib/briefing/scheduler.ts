@@ -85,26 +85,21 @@ function formatStoryMessage(
   const summary = removeHeadlineEcho(story.title, story.summary);
   const whyItMatters = ensureSentenceEnd(story.whyItMatters);
   const marketImpact = ensureSentenceEnd(story.marketImpact);
-  const analysisSameAsImpact =
-    comparisonText(whyItMatters) === comparisonText(marketImpact);
-  let analysisLine = analysisSameAsImpact
-    ? `למה זה חשוב והשפעה אפשרית: ${escapeHtml(marketImpact)}`
-    : `למה זה חשוב: ${escapeHtml(whyItMatters)} השפעה אפשרית: ${escapeHtml(marketImpact)}`;
   const analysisText = `${whyItMatters} ${marketImpact}`.toUpperCase();
   const additionalTickers = story.tickers.filter(
     (ticker) => !analysisText.includes(ticker.toUpperCase()),
   );
-  if (additionalTickers.length > 0) {
-    analysisLine +=
-      ` (${escapeHtml(additionalTickers.join(", "))})`;
-  }
+  const tickerText = additionalTickers.length > 0
+    ? ` (${escapeHtml(additionalTickers.join(", "))})`
+    : "";
 
   return [
-    `📰 <b>${escapeHtml(compactHeadline(story.title))}</b>`,
-    summary ? `מה קרה (עובדות): ${escapeHtml(summary)}` : "",
-    analysisLine,
-    `מקור: <a href="${escapeHtml(sourceUrl.toString())}">${escapeHtml(sourceLinkLabel(story.sourceName, sourceUrl))}</a>`,
-  ].filter(Boolean).join("\n");
+    `<b>${escapeHtml(compactHeadline(story.title))}</b>`,
+    summary ? `📰 <b>מה קרה:</b>\n${escapeHtml(summary)}` : "",
+    `🧠 <b>למה זה חשוב:</b>\n${escapeHtml(whyItMatters)}`,
+    `📈 <b>השפעה אפשרית:</b>\n${escapeHtml(marketImpact)}${tickerText}`,
+    `🔗 <a href="${escapeHtml(sourceUrl.toString())}">מקור: ${escapeHtml(sourceLinkLabel(story.sourceName, sourceUrl))}</a>`,
+  ].filter(Boolean).join("\n\n");
 }
 
 type HtmlTag = { name: string; opening: string };

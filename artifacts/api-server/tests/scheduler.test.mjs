@@ -2,15 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, load, story } from "./harness.mjs";
 
-function visibleWordCount(text) {
-  return text
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&(?:amp|lt|gt|quot|#39);/g, " ")
-    .trim()
-    .split(/\s+/u)
-    .filter(Boolean).length;
-}
-
 function assertBalancedTelegramHtml(text) {
   const stack = [];
   const tags = text.match(/<\/?b>|<\/?a(?: href="[^"]*")?>/g) ?? [];
@@ -68,7 +59,7 @@ test("scheduled slot sends at boundary, not before; only recent eligible undeliv
     /מה קרה/.test(text) &&
     /למה זה חשוב/.test(text) &&
     /השפעה אפשרית/.test(text) &&
-    /מקור: <a href="https:\/\/example\.test\/\d+">BBC World<\/a>/.test(text) &&
+    /🔗 <a href="https:\/\/example\.test\/\d+">מקור: BBC World<\/a>/.test(text) &&
     !/NEWS|AI ANALYSIS|AI RECOMMENDATION|POTENTIAL MARKET IMPACT|🕒|שעון ישראל/.test(text),
   ));
   assert.equal(await dispatchPendingStories(), 0);
@@ -110,24 +101,30 @@ test("each story is one concise Hebrew message with factual sections and a click
   assert.equal(financialMessage.parseMode, "HTML");
   assert.equal(nonfinancialMessage.parseMode, "HTML");
   assert.doesNotMatch(financialMessage.text, /🕒|שעון ישראל|תדרוכים/);
-  assert.doesNotMatch(financialMessage.text, /\n\s*\n/);
-  assert.equal((financialMessage.text.match(/📰/gu) ?? []).length, 1);
-  assert.doesNotMatch(financialMessage.text, /🔴|🧠|📈|🔗/u);
-  assert.ok(visibleWordCount(financialMessage.text) <= 100);
+  assert.doesNotMatch(financialMessage.text, /\n{3,}/);
+  for (const emoji of ["📰", "🧠", "📈", "🔗"]) {
+    assert.equal((financialMessage.text.match(new RegExp(emoji, "gu")) ?? []).length, 1);
+  }
+  assert.doesNotMatch(financialMessage.text, /🔴/u);
   assert.equal((financialMessage.text.match(/כותרת/g) ?? []).length, 1);
   assert.doesNotMatch(financialMessage.text, /\.\s*;/);
 
-  const headings = ["מה קרה (עובדות):", "למה זה חשוב:", "השפעה אפשרית:"];
+  const headings = [
+    "📰 <b>מה קרה:</b>",
+    "🧠 <b>למה זה חשוב:</b>",
+    "📈 <b>השפעה אפשרית:</b>",
+    "🔗 <a href=",
+  ];
   let previousIndex = -1;
   for (const heading of headings) {
     const index = financialMessage.text.indexOf(heading);
     assert.ok(index > previousIndex, `${heading} should appear in the required order`);
     previousIndex = index;
   }
-  assert.match(financialMessage.text, /השפעה אפשרית:.*\(NVDA\)/);
+  assert.match(financialMessage.text, /📈 <b>השפעה אפשרית:<\/b>\n.*\(NVDA\)/);
   assert.match(
     financialMessage.text,
-    /מקור: <a href="https:\/\/example\.test\/article\?one=1&amp;two=2">Reuters &amp; Desk<\/a>/,
+    /🔗 <a href="https:\/\/example\.test\/article\?one=1&amp;two=2">מקור: Reuters &amp; Desk<\/a>/,
   );
   assert.match(nonfinancialMessage.text, /השפעה אפשרית/);
   assert.match(nonfinancialMessage.text, /אין קשר ישיר לשוק על סמך המידע הזמין/);
@@ -151,7 +148,7 @@ test("long headlines are compacted and exact headline echoes are removed", async
   assert.ok(title.split(/\s+/u).filter(Boolean).length <= 12);
   assert.ok(message.includes("הדיווח כולל גם נתונים על היקף ההכנסות."));
   assert.ok(!message.includes(longHeadline));
-  assert.doesNotMatch(message, /\n\s*\n/);
+  assert.doesNotMatch(message, /\n{3,}/);
   assertBalancedTelegramHtml(message);
 });
 
@@ -166,7 +163,7 @@ test("Google News aggregator links are labeled as aggregators, not direct publis
   assert.equal(await dispatchPendingStories(), 1);
   assert.match(
     f.sent[0].text,
-    /מקור: <a href="https:\/\/news\.google\.com\/rss\/articles\/example-id">Reuters · דרך Google News<\/a>/,
+    /🔗 <a href="https:\/\/news\.google\.com\/rss\/articles\/example-id">מקור: Reuters · דרך Google News<\/a>/,
   );
 });
 

@@ -617,22 +617,27 @@ function parseAnalysis(value: unknown, candidates: Candidate[]): Analysis[] {
     const marketImpact =
       typeof item.marketImpact === "string" ? item.marketImpact.trim() : "";
     const titleWordCount = title.split(/\s+/u).filter(Boolean).length;
-    const contentWordCount = `${title} ${summary} ${whyItMatters} ${marketImpact}`
-      .split(/\s+/u)
-      .filter(Boolean).length;
+    const normalizedWhy = whyItMatters
+      .toLocaleLowerCase("he")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+    const normalizedImpact = marketImpact
+      .toLocaleLowerCase("he")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
     if (
       ![title, summary, whyItMatters, marketImpact].every((text) =>
         /[\u0590-\u05FF]/.test(text),
       ) ||
       titleWordCount > 12 ||
-      contentWordCount > 80
+      normalizedWhy === normalizedImpact
     ) {
       return [];
     }
     const summarySentenceCount = summary
       .split(/(?<=[.!?…])\s+/u)
       .filter((sentence) => sentence.trim().length > 0).length;
-    if (summarySentenceCount < 1 || summarySentenceCount > 2) return [];
+    if (summarySentenceCount < 2 || summarySentenceCount > 3) return [];
 
     const candidate = candidateMap.get(sourceId);
     if (!candidate) return [];
@@ -725,7 +730,7 @@ async function analyzeCandidates(candidates: Candidate[]): Promise<Analysis[]> {
         },
         {
           role: "system",
-          content: "כללי תמצות מחייבים: title הוא עד 12 מילים ואינו חוזר ב-summary. summary הוא משפט אחד או שניים של עובדות. whyItMatters ו-marketImpact הם משפטים קצרים, נפרדים ואינם חוזרים על אותו רעיון. שמור את ארבעת שדות התוכן יחד עד 80 מילים; השמט סיפור אם אי אפשר לתארו בקצרה ובדיוק. אין להוסיף כותרות, המלצות השקעה או עובדות שאינן במקור.",
+          content: "כללי כתיבה מחייבים: title הוא כותרת טבעית אחת ועד 12 מילים ואינו חוזר ב-summary. summary כולל 2–3 משפטים קצרים של עובדות בלבד. whyItMatters ו-marketImpact הם חלקים נפרדים, קצרים ומשלימים; לעולם אל תחזור על אותו רעיון ביניהם. שמור על תמציתיות, אך אל תשמיט הקשר נחוץ כדי לעמוד במכסת מילים. אין להוסיף כותרות, המלצות השקעה או עובדות שאינן במקור.",
         },
         {
           role: "user",

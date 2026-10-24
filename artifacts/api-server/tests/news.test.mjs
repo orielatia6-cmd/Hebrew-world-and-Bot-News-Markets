@@ -309,10 +309,10 @@ test("analysis rejects foreign IDs/non-Hebrew text and normalizes importance and
   const valid = { sourceId: "known", title: "כותרת", summary: "הדיווח מתאר את האירוע. פרטים נוספים מופיעים במקור.", whyItMatters: "חשוב", marketImpact: "השפעה" };
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, sourceId: "unknown" }] }, candidates), []);
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, summary: "English only" }] }, candidates), []);
-  assert.equal(
-    news.parseAnalysis({ stories: [{ ...valid, summary: "משפט עובדתי יחיד." }] }, candidates).length,
-    1,
-    "one concise factual sentence is valid",
+  assert.deepEqual(
+    news.parseAnalysis({ stories: [{ ...valid, summary: "משפט עובדתי יחיד." }] }, candidates),
+    [],
+    "the factual section should contain at least two short sentences",
   );
   assert.deepEqual(
     news.parseAnalysis(
@@ -327,18 +327,28 @@ test("analysis rejects foreign IDs/non-Hebrew text and normalizes importance and
     [],
     "analysis with a headline over 12 words must be rejected",
   );
+  const fullerSummary = `${Array.from({ length: 41 }, () => "עובדה").join(" ")}. ${Array.from({ length: 40 }, () => "פרט").join(" ")}.`;
+  assert.equal(
+    news.parseAnalysis(
+      { stories: [{ ...valid, summary: fullerSummary }] },
+      candidates,
+    ).length,
+    1,
+    "useful context is retained instead of being discarded for a word target",
+  );
   assert.deepEqual(
     news.parseAnalysis(
       {
         stories: [{
           ...valid,
-          summary: `${Array.from({ length: 81 }, () => "עובדה").join(" ")}.`,
+          whyItMatters: "האירוע חשוב.",
+          marketImpact: "האירוע חשוב.",
         }],
       },
       candidates,
     ),
     [],
-    "overlong analysis must be rejected rather than sent",
+    "duplicate why-it-matters and impact text is rejected",
   );
   assert.deepEqual(news.parseAnalysis(null, candidates), []);
   assert.deepEqual(
