@@ -14,7 +14,12 @@ test("read-only schema inspection checks only required metadata", async () => {
     calls.push({ sql, values });
     if (sql.includes("information_schema.columns")) return { rows: allColumns };
     if (sql.includes("FROM pg_indexes")) {
-      return { rows: diagnostics.requiredBriefingIndexes.map((indexname) => ({ indexname })) };
+      return {
+        rows: diagnostics.requiredBriefingIndexes.map((indexname) => ({
+          indexname,
+          indexdef: `CREATE UNIQUE INDEX ${indexname} ON briefing_stories (...)`,
+        })),
+      };
     }
     throw new Error("Unexpected query");
   });
@@ -65,4 +70,77 @@ test("safe error summary filters unsafe error names, codes, statuses, and messag
 
   assert.equal(output, "type=Error");
   assert.doesNotMatch(output, /password|Telegram|Bearer|host|postgres:\/\//);
+});
+
+test("migration preflight is read-only and permits only a duplicate-free full upgrade", async () => {
+  const calls = [];
+  const result = await diagnostics.inspectMigrationPreflight(async (sql, values) => {
+    calls.push({ sql, values });
+    if (sql.includes("information_schema.tables")) {
+      return {
+        rows: [
+          { table_name: "briefing_settings" },
+          { table_name: "briefing_stories" },
+        ],
+      };
+    }
+    if (sql.includes("information_schema.columns")) return { rows: [] };
+    if (sql.includes("FROM pg_indexes")) {
+      return [{
+        rows: [{
+          tablename: "briefing_stories",
+          indexname: diagnostics.legacySourceIndex,
+          indexdef: "CREATE UNIQUE INDEX briefing_stories_source_id_unique ON briefing_stories (source_id)",
+        }],
+      }][0];
+    }
+    if (sql.includes("FROM pg_constraint")) {
+      return { rows: [{ index_owned_by_constraint: false }] };
+    }
+    if (sql.includes("COUNT(*)")) {
+      return { rows: [{ stories_to_backfill: "12", has_duplicate_source_ids: false }] };
+    }
+    throw new Error("Unexpected query");
+  });
+
+  assert.equal(result.decision, "ready");
+  assert.deepEqual(result.missingTables, []);
+  assert.deepEqual(result.presentTargetColumns, []);
+  assert.equal(result.legacySourceUniqueIndexPresent, true);
+  assert.equal(result.legacySourceIndexOwnedByConstraint, false);
+  assert.equal(result.hasDuplicateSourceIds, false);
+  assert.equal(result.storiesToBackfill, 12);
+  assert.ok(calls.every(({ sql }) => /^\s*SELECT\b/i.test(sql)));
+});
+
+test("migration preflight blocks source-id duplicates and partial schema states", async () => {
+  const duplicateResult = await diagnostics.inspectMigrationPreflight(async (sql) => {
+    if (sql.includes("information_schema.tables")) {
+      return { rows: [{ table_name: "briefing_settings" }, { table_name: "briefing_stories" }] };
+    }
+    if (sql.includes("information_schema.columns")) return { rows: [] };
+    if (sql.includes("FROM pg_indexes")) return { rows: [] };
+    if (sql.includes("FROM pg_constraint")) {
+      return { rows: [{ index_owned_by_constraint: false }] };
+    }
+    return { rows: [{ stories_to_backfill: "3", has_duplicate_source_ids: true }] };
+  });
+  assert.equal(duplicateResult.decision, "blocked");
+  assert.equal(duplicateResult.hasDuplicateSourceIds, true);
+
+  const partialResult = await diagnostics.inspectMigrationPreflight(async (sql) => {
+    if (sql.includes("information_schema.tables")) {
+      return { rows: [{ table_name: "briefing_settings" }, { table_name: "briefing_stories" }] };
+    }
+    if (sql.includes("information_schema.columns")) {
+      return { rows: [{ table_name: "briefing_stories", column_name: "revision_key" }] };
+    }
+    if (sql.includes("FROM pg_indexes")) return { rows: [] };
+    if (sql.includes("FROM pg_constraint")) {
+      return { rows: [{ index_owned_by_constraint: false }] };
+    }
+    return { rows: [{ stories_to_backfill: "3", has_duplicate_source_ids: false }] };
+  });
+  assert.equal(partialResult.decision, "blocked");
+  assert.deepEqual(partialResult.presentTargetColumns, ["briefing_stories.revision_key"]);
 });
