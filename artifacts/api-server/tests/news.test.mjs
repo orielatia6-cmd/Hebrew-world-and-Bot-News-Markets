@@ -206,6 +206,105 @@ test("opt-in article context is capped, paraphrase-only, and falls back to RSS f
   assert.equal(f.stories.filter((story) => story.sourceName.includes("תקציר RSS בלבד")).length, 2);
 });
 
+test("an article body cut to fit the request budget is labeled partial without another AI call", async (t) => {
+  const f = fixture();
+  const oldKey = process.env.OPENAI_API_KEY;
+  const oldArticleFlag = process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED;
+  process.env.OPENAI_API_KEY = "fake-test-key";
+  process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED = "true";
+  t.after(() => {
+    if (oldKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = oldKey;
+    if (oldArticleFlag === undefined) delete process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED;
+    else process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED = oldArticleFlag;
+  });
+
+  const headlines = [
+    "Central bank changes its inflation outlook",
+    "Nvidia announces a new chip supply agreement",
+    "Tesla expands its battery production plan",
+    "Taiwan reports a new semiconductor export rule",
+    "Congress debates a new budget package",
+    "Microsoft expands its cloud computing region",
+    "Oil producers announce a change in output",
+    "European leaders reach an energy agreement",
+    "Federal Reserve officials discuss rate timing",
+    "Meta reports a new investment in data centers",
+    "US regulators publish a banking proposal",
+    "Japan revises its economic growth estimate",
+    "Airlines report a change in travel demand",
+    "China announces a new technology policy",
+    "US Treasury updates its borrowing estimate",
+  ];
+  const rssExcerpt = "The report describes company demand, supplier capacity and the relevant policy context. ".repeat(26).slice(0, 2_300);
+  let aiCalls = 0;
+  let requestMessages = [];
+  let requestItems = [];
+  let articleReads = 0;
+
+  t.mock.method(globalThis, "fetch", async () => ({
+    ok: true,
+    text: async () => "fixture feed",
+  }));
+  f.mocks["article-reader"] = {
+    readPublicArticle: async (url, title) => {
+      articleReads += 1;
+      return {
+        status: "article",
+        text: `The article reports verified facts about demand and capacity. ${"The publisher describes the data and context for the reported change. ".repeat(100)}`,
+        title,
+        siteName: "BBC News",
+        finalUrl: url,
+      };
+    },
+    fullArticleLimits: { maxFetchesPerRun: 1 },
+  };
+  const news = await load("lib/briefing/news.ts", {
+    ...f.mocks,
+    "rss-parser": { default: class {
+      async parseString() {
+        return {
+          items: headlines.map((title, index) => ({
+            title,
+            link: `https://example.test/news/${index}`,
+            isoDate: new Date().toISOString(),
+            source: "Reuters",
+            contentSnippet: rssExcerpt,
+          })),
+        };
+      }
+    } },
+    openai: { default: class {
+      chat = { completions: { create: async (request) => {
+        aiCalls += 1;
+        requestMessages = request.messages;
+        requestItems = JSON.parse(request.messages.find((message) => message.role === "user").content);
+        return { choices: [{ message: { content: JSON.stringify({
+          stories: requestItems.map((item) => professionalStory(item.sourceId)),
+        }) } }] };
+      } } };
+    } },
+  });
+
+  await news.refreshNews();
+  assert.equal(articleReads, 1);
+  assert.equal(aiCalls, 1);
+  assert.ok(countChatInputTokens(requestMessages) <= ANALYSIS_INPUT_TOKEN_LIMIT);
+  assert.ok(
+    requestItems.some((item) =>
+      item.materialScope.startsWith("Partial article-body excerpt"),
+    ),
+    JSON.stringify({
+      submittedStories: requestItems.length,
+      scopes: requestItems.map((item) => item.materialScope),
+      inputTokens: countChatInputTokens(requestMessages),
+    }),
+  );
+  assert.ok(f.stories.some((story) =>
+    story.sourceName.includes("גוף כתבה חלקי"),
+  ));
+});
+
 test("an OpenAI request timeout is identified as an analysis timeout without exposing credentials", async (t) => {
   const f = fixture();
   const previousKey = process.env.OPENAI_API_KEY;

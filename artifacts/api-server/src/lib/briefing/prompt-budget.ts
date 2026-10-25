@@ -6,7 +6,7 @@ const tokenizer = getEncoding("o200k_base");
 
 export const ANALYSIS_INPUT_TOKEN_LIMIT = 8_192;
 const CHAT_MESSAGE_OVERHEAD_TOKENS = 8;
-const REQUEST_SAFETY_MARGIN_TOKENS = 256;
+const REQUEST_SAFETY_MARGIN_TOKENS = 512;
 const MIN_EXCERPT_TOKENS = 80;
 
 export type AnalysisPayloadStory = {
