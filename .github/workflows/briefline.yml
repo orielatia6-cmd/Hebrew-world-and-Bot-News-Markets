@@ -6,6 +6,15 @@ on:
   schedule:
   - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run the scheduled bot or a read-only schema check"
+        required: true
+        type: choice
+        options:
+          - scheduled
+          - schema-check
+        default: scheduled
 
 permissions:
   contents: read
@@ -18,10 +27,6 @@ jobs:
   briefing:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -33,4 +38,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @workspace/api-server run build
-      - run: node artifacts/api-server/dist/github.mjs
+      - name: Read-only database schema check
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'schema-check' }}
+        run: node artifacts/api-server/dist/github.mjs --schema-check
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Run scheduled Telegram job
+        if: ${{ github.event_name == 'schedule' || inputs.mode != 'schema-check' }}
+        run: node artifacts/api-server/dist/github.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
