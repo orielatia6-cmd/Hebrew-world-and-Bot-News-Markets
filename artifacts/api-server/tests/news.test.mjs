@@ -182,7 +182,7 @@ test("invalid, missing, old, and future publication dates are rejected", async (
         { title: "Old report", link: "https://example.test/old-date", isoDate: "2000-01-01" },
         { title: "Future report", link: "https://example.test/future-date", isoDate: new Date(now + 60 * 60_000).toISOString() },
         { title: "Headline only", link: "https://example.test/headline-only", isoDate: new Date(now - 5 * 60_000).toISOString() },
-        { title: "Fresh market news", link: "https://example.test/fresh", isoDate: new Date(now - 5 * 60_000).toISOString(), contentSnippet: "The Federal Reserve published a policy update with details about its timetable and implementation process." },
+        { title: "Fresh market news", link: "https://example.test/fresh", isoDate: new Date(now - 5 * 60_000).toISOString(), contentSnippet: "Fresh market news", summary: "The Federal Reserve published a policy update with details about its timetable and implementation process." },
       ] };
     } } },
     openai: { default: class {
@@ -202,6 +202,7 @@ test("invalid, missing, old, and future publication dates are rejected", async (
   await news.refreshNews();
   assert.equal(analyzedCandidates.length, 1);
   assert.match(analyzedCandidates[0].title, /Fresh market news/);
+  assert.match(analyzedCandidates[0].excerpt, /published a policy update/);
   assert.equal(
     analyzedCandidates[0].materialScope,
     "RSS title and excerpt only; the full article was not fetched",

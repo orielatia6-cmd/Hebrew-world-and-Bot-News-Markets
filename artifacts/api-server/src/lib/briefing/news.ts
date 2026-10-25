@@ -360,10 +360,11 @@ async function fetchFeed(feed: FeedDefinition): Promise<Candidate[]> {
         return null;
       }
 
-      const articleContext = cleanText(
-        item.contentSnippet ?? item.summary ?? item.content ?? "",
-      ).slice(0, 2_400);
-      if (!hasSubstantiveExcerpt(title, articleContext)) return null;
+      const articleContext =
+        [item.contentSnippet, item.summary, item.content]
+          .flatMap((value) => typeof value === "string" ? [cleanText(value).slice(0, 2_400)] : [])
+          .find((excerpt) => hasSubstantiveExcerpt(title, excerpt)) ?? "";
+      if (!articleContext) return null;
       const sourceName = itemSourceName(item, feed.name);
       const partial = {
         title,
