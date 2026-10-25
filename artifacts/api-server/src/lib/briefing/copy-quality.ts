@@ -21,13 +21,13 @@ export type CopyValidationOptions = {
 const publisherNames =
   /\b(?:WSJ|Wall Street Journal|Reuters|Bloomberg|CNBC|Yahoo Finance|BBC(?: News)?|The Guardian|Financial Times|Associated Press|AP News|Google News)\b/iu;
 const metaPhrases =
-  /(?:הכותרת\s+(?:מצביעה|אומרת|מעידה|מרמזת|מראה)|(?:המקור|הכתבה|הדיווח|הסיכום)\s+(?:מתאר|מצביע|מראה|אומר|מסביר|מדווח|מציין)|מהכותרת\s+עולה|מהדיווח\s+עולה|דיווח\s+הבום|באופן\s+\p{L}+\s+כבד)/iu;
+  /(?:הכותרת\s+(?:מצביעה|אומרת|מעידה|מרמזת|מראה)|(?:המקור|הכתבה|הדיווח|הסיכום)\s+(?:מתאר|מצביע|מראה|אומר|מסביר|מדווח|מציין)|מהכותרת\s+עולה|מהדיווח\s+עולה|דיווח\s+הבום|באופן\s+\p{L}+\s+כבד|(?:לפי|על\s+פי)\s+(?:הכותרת|התקציר)|הכותרת\s+והתקציר|בקטע\s+הזמין)/iu;
 const literalEnglishPhrases =
   /\b(?:according to|the headline|headline indicates|report says|earnings boom|stocks earnings)\b/iu;
 const genericWhy =
   /^(?:חשוב|הנושא חשוב|האירוע חשוב|הדבר חשוב|המידע חשוב|יש לכך חשיבות|האירוע משמעותי)[.!?…]*$|^(?:ההודעה|הדיווח|האירוע)\s+מספק(?:ת|ים)? למשקיעים מידע(?:\s|[.!?…]|$)/u;
 const vagueAnalysis =
-  /(?:הרחבת המימון הפעיל בתחום|שינוי חשיפת הסקטור לסיכונים והזדמנויות מימון|חשיפת הסקטור לסיכונים והזדמנויות|הזדמנויות מימון לצד סיכונים|משנה את החשיפה לסיכונים ולהזדמנויות|מייצר הזדמנויות וסיכונים בתחום|(?:חשיפת|חשיפה)\s+.{0,24}סיכונים.{0,24}הזדמנויות)/u;
+  /(?:הרחבת המימון הפעיל בתחום|שינוי חשיפת הסקטור לסיכונים והזדמנויות מימון|חשיפת הסקטור לסיכונים והזדמנויות|הזדמנויות מימון לצד סיכונים|משנה את החשיפה לסיכונים ולהזדמנויות|מייצר הזדמנויות וסיכונים בתחום|(?:חשיפת|חשיפה)\s+.{0,24}סיכונים.{0,24}הזדמנויות|יצירת\s+ציפיות\s+לעתיד\s+ההכנסות|ריכוזיות\s+בענפים?\s+הרלוונטיים|ריכוזיות\s+בתרומת\s+הרווחים\s+לשוק)/u;
 const genericImpact =
   /^(?:(?:הדבר|ההודעה|ההתפתחות)\s+)?(?:עשוי|עלול|עלולה)?\s*להשפיע על השוק(?:ים)?(?: באופן כללי)?[.!?…]*$|^(?:השפעה|ההשפעה) על השוק אינה ברורה[.!?…]*$/u;
 const literalTranslation =
@@ -168,6 +168,48 @@ const acquisitionNegation =
 const directionalAcquisitionLanguage =
   /(?:\b(?:acquir(?:e|es|ed|ing)|buy|buys|bought|purchas(?:e|es|ed|ing)|take\s+over|takes\s+over|took\s+over)\b|(?:רוכש(?:ת|ים|ות)?|רכש(?:ה|ו)?|תרכוש|לרכוש|קונ(?:ה|ים|ות)|קנתה|יקנה))/iu;
 
+type SourceEvidenceStatus = "analyst" | "talks" | "unconfirmed" | "official" | "plain";
+
+const analystEvidence =
+  /(?:\banalyst(?:s)?\b|\bwall street\s+(?:estimates?|expects?|sees|believes)\b|\banalyst note\b|אנליסט(?:ים)?|וול סטריט\s+(?:מעריכה|מעריכים|צופה|צופים)|הערכת\s+אנליסטים)/iu;
+const talksEvidence =
+  /(?:\bin talks\b|\bdiscussions?\b|\bconsidering\b|\bexploring\b|\bweighing\b|\bpossible\s+(?:deal|merger|acquisition)\b|\bpotential\s+(?:deal|merger|acquisition)\b|מגעים|בשיחות|דנים|בוחנ(?:ת|ים)|שוקל(?:ת|ים)|אפשרות\s+ל)/iu;
+const unconfirmedEvidence =
+  /(?:\breportedly\b|\baccording to (?:people|sources)\b|\bunnamed sources?\b|\bsources?\s+(?:say|said|tell)\b|\breport(?:s|ed)? that\b|לפי\s+דיווח|על\s+פי\s+מקורות|לפי\s+גורמים|גורמים\s+אמרו|דווח\s+כי)/iu;
+const officialEvidence =
+  /(?:\bofficial(?:ly)?\s+(?:announced|confirmed)\b|\bannounced\b|\bconfirmed\b|\bfiled\b|\bin an official statement\b|\bthe company said in a statement\b|הודיע(?:ה|ו)\s+(?:רשמית|על)|אישר(?:ה|ו)\s+(?:רשמית|את)|מסר(?:ה|ו)\s+בהודעה|פרסמ(?:ה|ו)\s+הודעה|הגיש(?:ה|ו)\s+מסמך)/iu;
+const analystAttribution =
+  /(?:אנליסט(?:ים)?|לפי\s+הערכות|הערכת\s+שוק|וול\s+סטריט\s+(?:מעריכה|מעריכים|צופה|צופים))/iu;
+const uncertaintyAttribution =
+  /(?:אפשרות|עשוי(?:ה|ים|ות)?|עלול(?:ה|ים|ות)?|ייתכן|יתכן|בוחנ(?:ת|ים)|שוקל(?:ת|ים)|מגעים|טרם|לא\s+הודיע(?:ה|ו)|לא\s+אישר(?:ה|ו))/iu;
+const reportAttribution =
+  /(?:לפי\s+דיווח|על\s+פי\s+מקורות|לפי\s+גורמים|דווח\s+כי|גורמים\s+אמרו)/iu;
+const officialAttribution =
+  /(?:הודיע(?:ה|ו)?|אישר(?:ה|ו)?|מסר(?:ה|ו)?\s+בהודעה|פרסמ(?:ה|ו)?\s+הודעה|הגיש(?:ה|ו)?\s+מסמך|בהודעה\s+רשמית)/iu;
+
+function sourceEvidenceStatus(sourceText: string): SourceEvidenceStatus {
+  if (analystEvidence.test(sourceText)) return "analyst";
+  if (talksEvidence.test(sourceText)) return "talks";
+  if (unconfirmedEvidence.test(sourceText)) return "unconfirmed";
+  if (officialEvidence.test(sourceText)) return "official";
+  return "plain";
+}
+
+function preservesEvidenceStatus(sourceText: string, generatedText: string): boolean {
+  switch (sourceEvidenceStatus(sourceText)) {
+    case "analyst":
+      return analystAttribution.test(generatedText) && uncertaintyAttribution.test(generatedText);
+    case "talks":
+      return uncertaintyAttribution.test(generatedText);
+    case "unconfirmed":
+      return reportAttribution.test(generatedText) && uncertaintyAttribution.test(generatedText);
+    case "official":
+      return officialAttribution.test(generatedText);
+    case "plain":
+      return true;
+  }
+}
+
 function claimsFromText(
   text: string,
   aliases: EntityAlias[],
@@ -269,6 +311,15 @@ export function sourceSupportsGeneratedCopy(input: {
   const bodyClaims = claimsFromText(input.sourceText, aliases);
   const sourceClaims = [...titleClaims, ...bodyClaims];
   if (contradictoryClaims(sourceClaims)) return false;
+
+  if (
+    !preservesEvidenceStatus(
+      `${input.sourceTitle}\n${input.sourceText}`,
+      input.generatedText,
+    )
+  ) {
+    return false;
+  }
 
   const generatedClaims = claimsFromText(input.generatedText, aliases);
   if (contradictoryClaims(generatedClaims)) return false;

@@ -12,8 +12,8 @@ const {
 function professionalStory(sourceId, overrides = {}) {
   return {
     sourceId,
-    title: "הבנק המרכזי פרסם החלטת מדיניות חדשה",
-    summary: "הבנק המרכזי פרסם החלטת מדיניות חדשה. המסמך מפרט את מועד התחולה ואת סעיפי ההחלטה.",
+    title: "הבנק המרכזי הודיע על החלטת מדיניות חדשה",
+    summary: "הבנק המרכזי הודיע על החלטת מדיניות חדשה. המסמך מפרט את מועד התחולה ואת סעיפי ההחלטה.",
     whyItMatters: "ההחלטה עשויה לשנות את עלות המימון של משקי הבית והעסקים.",
     marketImpact: "אם התנאים שונים מציפיות השוק, מדדי האג״ח עשויים להגיב.",
     importance: 3,
@@ -73,6 +73,8 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
   assert.match(editorialInstructions, /החזר 0–6 סיפורים מהותיים בלבד/u);
   assert.match(editorialInstructions, /מנגנון ברור כמו עלות, ביקוש, היצע, רגולציה או ריבית/u);
   assert.match(editorialInstructions, /תעתק שמות אנשים ומקומות כשמקובל/u);
+  assert.match(editorialInstructions, /אל תהפוך אפשרות לעובדה/u);
+  assert.match(editorialInstructions, /השערת אנליסטים מיוחסת במפורש/u);
   assert.equal(requests[0].length, 1);
   assert.equal(requests[0][0].source, "Reuters");
   assert.equal(f.stories[0].sourceName, "Reuters · תקציר RSS בלבד");
@@ -515,7 +517,7 @@ test("professional Hebrew rejects source insertion and meta language, while keep
   const malformed = {
     sourceId: "wsj",
     title: "שיא הרווחים תלוי בכמה מניות בודדות, לפי WSJ",
-    summary: "דיווח הבום ברווחי החברות נשען באופן WSJ כבד על מספר מועט של מניות. הכותרת מצביעה על ריכוזיות בתרומת הרווחים לשוק.",
+    summary: "לפי הכותרת והתקציר שפורסמו, דיווח הבום ברווחי החברות נשען באופן WSJ כבד על מספר מועט של מניות.",
     whyItMatters: "הכותרת מצביעה על ריכוזיות בתרומת הרווחים לשוק.",
     marketImpact: "המדד תלוי ברווחי אותן חברות.",
     importance: 4,
@@ -629,6 +631,89 @@ test("three editorial examples accept concrete Hebrew and reject vague template 
     );
     assert.ok(accepted.whyItMatters.length > 20);
   }
+});
+
+test("source certainty and attribution survive Hebrew rewriting", async () => {
+  const f = fixture();
+  const news = await load("lib/briefing/news.ts", f.mocks, {
+    "news.ts": ["parseAnalysis"],
+  });
+  const sourceTitle = "Analysts see a possible SpaceX-Tesla merger";
+  const sourceText =
+    "Analysts say the companies could consider a merger. Neither company has announced an agreement.";
+  const candidate = {
+    sourceId: "rumor",
+    title: sourceTitle,
+    articleContext: sourceText,
+    sourceName: "Reuters",
+    priorReports: [],
+  };
+  const baseStory = {
+    sourceId: "rumor",
+    importance: 3,
+    sentiment: "neutral",
+    tickers: ["TSLA"],
+    marketImpact: "",
+  };
+
+  assert.deepEqual(
+    news.parseAnalysis({
+      stories: [{
+        ...baseStory,
+        title: "SpaceX וטסלה התמזגו",
+        summary: "החברות השלימו מיזוג והודיעו על העסקה.",
+        whyItMatters: "המיזוג מאחד את הפעילות של שתי החברות.",
+      }],
+    }, [candidate]),
+    [],
+    "an analyst scenario must not become a completed deal",
+  );
+  assert.equal(
+    news.parseAnalysis({
+      stories: [{
+        ...baseStory,
+        title: "אנליסטים רואים אפשרות למיזוג בין SpaceX לטסלה",
+        summary: "אנליסטים מעריכים כי החברות עשויות לשקול מיזוג; הן לא הודיעו על הסכם.",
+        whyItMatters:
+          "ללא הודעה או תנאים, אין בסיס לקבוע אם האפשרות תשפיע על פעילות החברות.",
+      }],
+    }, [candidate]).length,
+    1,
+    "the copy preserves both analyst attribution and uncertainty",
+  );
+  const officialCandidate = {
+    sourceId: "official",
+    title: "Company announces a production expansion",
+    articleContext:
+      "The company announced a new production line in an official statement.",
+    sourceName: "Reuters",
+    priorReports: [],
+  };
+  assert.deepEqual(
+    news.parseAnalysis({
+      stories: [{
+        ...baseStory,
+        sourceId: "official",
+        title: "החברה מרחיבה את הייצור",
+        summary: "קו ייצור חדש יפעל במפעל החברה.",
+        whyItMatters: "ההרחבה מתארת שינוי בתוכנית הייצור של החברה.",
+      }],
+    }, [officialCandidate]),
+    [],
+    "an official statement must remain explicitly attributed",
+  );
+  assert.equal(
+    news.parseAnalysis({
+      stories: [{
+        ...baseStory,
+        sourceId: "official",
+        title: "החברה הודיעה על קו ייצור חדש",
+        summary: "החברה הודיעה על הוספת קו ייצור במפעל.",
+        whyItMatters: "ההודעה מעדכנת את תוכנית הייצור שלה.",
+      }],
+    }, [officialCandidate]).length,
+    1,
+  );
 });
 
 test("acquisition roles must agree across source headline, source text, and Hebrew copy", async () => {
