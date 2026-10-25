@@ -145,8 +145,10 @@ export function story(id, importance = 4) {
   return {
     id, sourceId: `source-${id}`, revisionKey: `revision-${id}`,
     eventKey: `event-${id}`, originalTitle: `Original ${id}`,
-    title: "כותרת", summary: "סיכום",
-    whyItMatters: "חשיבות", marketImpact: "השפעה",
+    title: "כותרת",
+    summary: "הבנק המרכזי פרסם החלטת מדיניות חדשה. המסמך מפרט את ההחלטה ואת מועד תחולתה.",
+    whyItMatters: "ההחלטה משנה את עלות האשראי ומספקת למשקי הבית בסיס לתכנון.",
+    marketImpact: "אם ההחלטה שונה מציפיות השוק, מדדי האג״ח עשויים להגיב.",
     url: `https://example.test/${id}`, sourceName: "BBC World", category: "world",
     importance, tickers: [], deliveredAt: null, createdAt: new Date(), publishedAt: new Date(),
   };

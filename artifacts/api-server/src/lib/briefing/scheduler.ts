@@ -10,6 +10,7 @@ import { refreshNews } from "./news";
 import { ensureBriefingSettings } from "./store";
 import { sendTelegramMessage } from "./telegram";
 import { digestSlot } from "./schedule";
+import { normalizeProfessionalCopy } from "./copy-quality";
 
 const SOURCE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const MAX_STORIES_PER_DIGEST = 3;
@@ -61,28 +62,9 @@ function comparisonText(text: string): string {
     .trim();
 }
 
-function removeHeadlineEcho(title: string, summary: string): string {
-  const titleKey = comparisonText(title);
-  if (!titleKey) return summary.trim();
-  const sentences = summary.match(/[^.!?…]+[.!?…]?/gu) ?? [summary];
-  return sentences
-    .filter((sentence) => comparisonText(sentence) !== titleKey)
-    .join(" ")
-    .trim();
-}
-
 function ensureSentenceEnd(text: string): string {
   const trimmed = text.trim();
   return /[.!?…]$/u.test(trimmed) ? trimmed : `${trimmed}.`;
-}
-
-function conciseSentences(text: string, maximum: number): string {
-  const trimmed = text.trim();
-  // Older stored analyses may be abnormally long. Keep all their content and
-  // let the safe Telegram splitter divide it instead of silently truncating.
-  if (trimmed.length > 1_200) return trimmed;
-  const sentences = trimmed.split(/(?<=[.!?…])\s+/u).filter(Boolean);
-  return sentences.slice(0, maximum).join(" ").trim();
 }
 
 function hasMarketRelevance(
@@ -115,6 +97,10 @@ function formatStoryMessage(
   story: typeof briefingStoriesTable.$inferSelect,
   breaking = false,
 ): string {
+  const copy = normalizeProfessionalCopy(story, { legacyStored: true });
+  if (!copy) {
+    throw new Error(`Story ${story.id} failed Hebrew editorial quality checks.`);
+  }
   let sourceUrl: URL;
   try {
     sourceUrl = new URL(story.url);
@@ -125,13 +111,10 @@ function formatStoryMessage(
     throw new Error(`Story ${story.id} has an unsupported source URL protocol.`);
   }
 
-  const summaryText = conciseSentences(
-    removeHeadlineEcho(story.title, story.summary),
-    2,
-  );
+  const summaryText = copy.summary;
   const summary = summaryText ? ensureSentenceEnd(summaryText) : "";
-  const whyItMatters = ensureSentenceEnd(conciseSentences(story.whyItMatters, 1));
-  const marketImpactText = conciseSentences(story.marketImpact, 1);
+  const whyItMatters = ensureSentenceEnd(copy.whyItMatters);
+  const marketImpactText = copy.marketImpact;
   const showMarketImpact =
     hasMarketRelevance(story, summary, whyItMatters, marketImpactText) &&
     hasSpecificMarketImpact(marketImpactText, story.tickers);
@@ -326,7 +309,17 @@ async function dispatchPendingStories(force = false, breaking = false): Promise<
     )
     .orderBy(desc(briefingStoriesTable.importance), desc(briefingStoriesTable.publishedAt))
     .limit(40);
-  const pending = eligible
+  const publishable = eligible.filter(
+    (story) => normalizeProfessionalCopy(story, { legacyStored: true }) !== null,
+  );
+  const skippedForCopyQuality = eligible.length - publishable.length;
+  if (skippedForCopyQuality > 0) {
+    logger.warn(
+      { skipped: skippedForCopyQuality },
+      "Skipped stored stories that failed Hebrew editorial quality checks.",
+    );
+  }
+  const pending = publishable
     .sort(
       (left, right) =>
         right.importance - left.importance ||

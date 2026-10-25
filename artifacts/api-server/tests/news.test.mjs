@@ -2,6 +2,22 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, load } from "./harness.mjs";
 
+function professionalStory(sourceId, overrides = {}) {
+  return {
+    sourceId,
+    title: "הבנק המרכזי פרסם החלטת מדיניות חדשה",
+    summary: "הבנק המרכזי פרסם החלטת מדיניות חדשה. המסמך מפרט את מועד התחולה ואת סעיפי ההחלטה.",
+    whyItMatters: "ההחלטה עשויה לשנות את עלות המימון של משקי הבית והעסקים.",
+    marketImpact: "אם התנאים שונים מציפיות השוק, מדדי האג״ח עשויים להגיב.",
+    importance: 3,
+    tickers: [],
+    sentiment: "neutral",
+    eventKey: "",
+    materialUpdate: false,
+    ...overrides,
+  };
+}
+
 test("feeds deduplicate URLs/fragments and persisted stories before paid analysis", async (t) => {
   const f = fixture();
   const previousKey = process.env.OPENAI_API_KEY;
@@ -18,8 +34,8 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
       constructor(options) { parserOptions.push(options); }
       async parseString() {
       return { items: [
-        { title: "News", link: "https://example.test/news#one", isoDate: new Date().toISOString(), source: "Reuters" },
-        { title: "News again", link: "https://example.test/news#two", isoDate: new Date().toISOString(), source: "Reuters" },
+        { title: "News", link: "https://example.test/news#one", isoDate: new Date().toISOString(), source: "Reuters", contentSnippet: "The company raised its annual outlook after revenue growth and stronger demand across several business lines." },
+        { title: "News again", link: "https://example.test/news#two", isoDate: new Date().toISOString(), source: "Reuters", contentSnippet: "The company raised its annual outlook after revenue growth and stronger demand across several business lines." },
         { title: "Invalid", link: "javascript:bad" },
         { title: "Old", link: "https://example.test/old", isoDate: "2000-01-01" },
       ] };
@@ -31,11 +47,7 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
         const candidates = JSON.parse(request.messages.find((message) => message.role === "user").content);
         requests.push(candidates);
         return { choices: [{ message: { content: JSON.stringify({
-          stories: candidates.map((c) => ({
-            sourceId: c.sourceId, title: "כותרת", summary: "המקור מתאר את האירוע. הפרטים מופיעים בדיווח.", whyItMatters: "חשוב",
-            marketImpact: "השפעה", importance: 3, tickers: [], sentiment: "neutral",
-            eventKey: "", materialUpdate: false,
-          })),
+          stories: candidates.map((c) => professionalStory(c.sourceId)),
         }) } }] };
       } } };
     } },
@@ -64,7 +76,7 @@ test("an OpenAI request timeout is identified as an analysis timeout without exp
   const news = await load("lib/briefing/news.ts", {
     ...f.mocks,
     "rss-parser": { default: class { async parseString() {
-       return { items: [{ title: "New story", link: "https://example.test/new-story", isoDate: new Date().toISOString() }] };
+       return { items: [{ title: "New story", link: "https://example.test/new-story", isoDate: new Date().toISOString(), contentSnippet: "A company announced a new agreement that will expand production capacity and create a larger supply commitment next year." }] };
     } } },
     openai: { default: class {
       constructor(options) { assert.equal(options.timeout, 90_000); }
@@ -73,6 +85,33 @@ test("an OpenAI request timeout is identified as an analysis timeout without exp
   });
 
   await assert.rejects(news.refreshNews(), /OpenAI news analysis request timed out after 90 seconds/);
+  assert.equal(f.stories.length, 0, "an AI failure must not create generic fallback news");
+});
+
+test("headline-only stories are skipped and unavailable AI fails closed without fabricated fallback", async (t) => {
+  const f = fixture();
+  const previousKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  t.after(() => previousKey === undefined ? delete process.env.OPENAI_API_KEY : process.env.OPENAI_API_KEY = previousKey);
+
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, text: async () => "fixture feed" }));
+  const news = await load("lib/briefing/news.ts", {
+    ...f.mocks,
+    "rss-parser": { default: class { async parseString() {
+      return { items: [
+        { title: "Headline only", link: "https://example.test/headline", isoDate: new Date().toISOString() },
+        {
+          title: "Policy update",
+          link: "https://example.test/policy",
+          isoDate: new Date().toISOString(),
+          contentSnippet: "The central bank published a detailed policy update, including implementation dates and changes to its lending terms.",
+        },
+      ] };
+    } } },
+  });
+
+  await assert.rejects(news.refreshNews(), /OPENAI_API_KEY is not configured/);
+  assert.equal(f.stories.length, 0, "no AI-generated or generic replacement story is persisted");
 });
 
 test("a failed feed is recorded without blocking stories from healthy feeds", async (t) => {
@@ -89,17 +128,15 @@ test("a failed feed is recorded without blocking stories from healthy feeds", as
   const news = await load("lib/briefing/news.ts", {
     ...f.mocks,
     "rss-parser": { default: class { async parseString(feedUrl) {
-       return { items: [{ title: "News", link: `https://example.test/${encodeURIComponent(feedUrl)}`, isoDate: new Date().toISOString() }] };
+       return { items: [{ title: "News", link: `https://example.test/${encodeURIComponent(feedUrl)}`, isoDate: new Date().toISOString(), contentSnippet: "The central bank published a detailed policy update after its meeting, including a new timetable for implementation." }] };
     } } },
     openai: { default: class {
       chat = { completions: { create: async (request) => {
         const candidates = JSON.parse(request.messages.find((message) => message.role === "user").content);
         return { choices: [{ message: { content: JSON.stringify({
-          stories: candidates.map((candidate) => ({
-            sourceId: candidate.sourceId, title: "כותרת חדשות", summary: "המקור מתאר את האירוע. הפרטים מופיעים בדיווח.",
-            whyItMatters: "חשוב", marketImpact: "השפעה", importance: 3,
-            eventKey: "", materialUpdate: false,
-            tickers: [], sentiment: "neutral",
+          stories: candidates.map((candidate) => professionalStory(candidate.sourceId, {
+            title: "הבנק המרכזי פרסם עדכון מדיניות",
+            summary: "הבנק המרכזי פרסם עדכון למדיניות לאחר ישיבתו. המסמך כולל לוח זמנים ליישום.",
           })),
         }) } }] };
       } } };
@@ -144,7 +181,8 @@ test("invalid, missing, old, and future publication dates are rejected", async (
         { title: "Bad date", link: "https://example.test/bad-date", isoDate: "not-a-date" },
         { title: "Old report", link: "https://example.test/old-date", isoDate: "2000-01-01" },
         { title: "Future report", link: "https://example.test/future-date", isoDate: new Date(now + 60 * 60_000).toISOString() },
-        { title: "Fresh market news", link: "https://example.test/fresh", isoDate: new Date(now - 5 * 60_000).toISOString(), contentSnippet: "Federal Reserve policy update." },
+        { title: "Headline only", link: "https://example.test/headline-only", isoDate: new Date(now - 5 * 60_000).toISOString() },
+        { title: "Fresh market news", link: "https://example.test/fresh", isoDate: new Date(now - 5 * 60_000).toISOString(), contentSnippet: "The Federal Reserve published a policy update with details about its timetable and implementation process." },
       ] };
     } } },
     openai: { default: class {
@@ -164,6 +202,10 @@ test("invalid, missing, old, and future publication dates are rejected", async (
   await news.refreshNews();
   assert.equal(analyzedCandidates.length, 1);
   assert.match(analyzedCandidates[0].title, /Fresh market news/);
+  assert.equal(
+    analyzedCandidates[0].materialScope,
+    "RSS title and excerpt only; the full article was not fetched",
+  );
 });
 
 test("factual number and quote validation rejects unsupported claims", async () => {
@@ -175,20 +217,58 @@ test("factual number and quote validation rejects unsupported claims", async () 
   };
   const base = {
     sourceId: "known", title: "הפד הותיר את הריבית ללא שינוי",
-    summary: "הפדרל ריזרב הותיר את הריבית על 5.25%. ההחלטה דווחה במקור.",
+    summary: "הפדרל ריזרב הותיר את הריבית על 5.25%.",
     whyItMatters: "ההחלטה משפיעה על עלות האשראי.",
-    marketImpact: "התגובה במדדים תלויה בציפיות המשקיעים.",
+    marketImpact: "אם ההחלטה שונה מציפיות השוק, התשואות עשויות להשתנות.",
     importance: 4, sentiment: "neutral", tickers: [],
   };
   assert.equal(news.parseAnalysis({ stories: [base] }, [candidate]).length, 1);
   assert.deepEqual(
-    news.parseAnalysis({ stories: [{ ...base, summary: "הריבית נקבעה על 6.25%. פרטים נוספים מופיעים במקור." }] }, [candidate]),
+    news.parseAnalysis({ stories: [{ ...base, summary: "הריבית נקבעה על 6.25%." }] }, [candidate]),
     [],
   );
   assert.deepEqual(
     news.parseAnalysis({ stories: [{ ...base, summary: "הפד אמר ״ההחלטה מפתיעה״. פרטים נוספים מופיעים במקור." }] }, [candidate]),
     [],
   );
+});
+
+test("professional Hebrew rejects source insertion and meta language, while keeping distinct market analysis", async () => {
+  const f = fixture();
+  const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["parseAnalysis"] });
+  const candidate = {
+    sourceId: "wsj",
+    title: "S&P 500 profit growth depends on a handful of stocks, WSJ says",
+    articleContext: "A small group of companies accounts for much of earnings growth in the S&P 500.",
+    sourceName: "The Wall Street Journal",
+    priorReports: [],
+  };
+  const malformed = {
+    sourceId: "wsj",
+    title: "שיא הרווחים תלוי בכמה מניות בודדות, לפי WSJ",
+    summary: "דיווח הבום ברווחי החברות נשען באופן WSJ כבד על מספר מועט של מניות. הכותרת מצביעה על ריכוזיות בתרומת הרווחים לשוק.",
+    whyItMatters: "הכותרת מצביעה על ריכוזיות בתרומת הרווחים לשוק.",
+    marketImpact: "המדד תלוי ברווחי אותן חברות.",
+    importance: 4,
+    sentiment: "neutral",
+    tickers: ["SPX"],
+  };
+  assert.deepEqual(news.parseAnalysis({ stories: [malformed] }, [candidate]), []);
+
+  const polished = {
+    ...malformed,
+    title: "מספר מצומצם של חברות מוביל את צמיחת הרווחים במדד",
+    summary: "חלק ניכר מצמיחת הרווחים במדד מגיע ממספר מצומצם של חברות. הקטע הזמין אינו מפרט את שמותיהן או את היקף התרומה.",
+    whyItMatters: "הנתון מלמד שהצמיחה ברווחי המדד אינה מתפזרת באופן שווה בין החברות.",
+    marketImpact: "אם החברות המובילות יאכזבו, תחזיות הרווח של המדד עלולות להיחלש.",
+  };
+  const parsed = news.parseAnalysis({ stories: [polished] }, [candidate]);
+  assert.equal(parsed.length, 1);
+  assert.doesNotMatch(
+    `${parsed[0].title} ${parsed[0].summary} ${parsed[0].whyItMatters} ${parsed[0].marketImpact}`,
+    /WSJ|Wall Street Journal|הכותרת מצביעה|דיווח הבום/u,
+  );
+  assert.notEqual(parsed[0].whyItMatters, parsed[0].marketImpact);
 });
 
 test("relevance ranking favors market-moving topics and reputable sources", async () => {
@@ -306,7 +386,13 @@ test("analysis rejects foreign IDs/non-Hebrew text and normalizes importance and
   const f = fixture();
   const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["parseAnalysis"] });
   const candidates = [{ sourceId: "known", priorReports: [] }];
-  const valid = { sourceId: "known", title: "כותרת", summary: "הדיווח מתאר את האירוע. פרטים נוספים מופיעים במקור.", whyItMatters: "חשוב", marketImpact: "השפעה" };
+  const valid = {
+    sourceId: "known",
+    title: "הבנק פרסם החלטת מדיניות",
+    summary: "הבנק המרכזי פרסם את החלטתו לאחר ישיבה. המסמך מפרט את מועד התחולה.",
+    whyItMatters: "ההחלטה משנה את עלות האשראי עבור משקי הבית והחברות.",
+    marketImpact: "אם ההחלטה שונה מהציפיות, תשואות האג״ח עשויות להשתנות.",
+  };
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, sourceId: "unknown" }] }, candidates), []);
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, summary: "English only" }] }, candidates), []);
   assert.equal(
@@ -315,9 +401,9 @@ test("analysis rejects foreign IDs/non-Hebrew text and normalizes importance and
     "a story without a supported market impact remains valid and may omit that section",
   );
   assert.deepEqual(
-    news.parseAnalysis({ stories: [{ ...valid, summary: "משפט עובדתי יחיד." }] }, candidates),
-    [],
-    "the factual section should contain at least two short sentences",
+    news.parseAnalysis({ stories: [{ ...valid, summary: "הבנק המרכזי פרסם החלטת ריבית חדשה." }] }, candidates).length,
+    1,
+    "one factual sentence is sufficient when the source provides only one key fact",
   );
   assert.deepEqual(
     news.parseAnalysis(
@@ -332,7 +418,7 @@ test("analysis rejects foreign IDs/non-Hebrew text and normalizes importance and
     [],
     "analysis with a headline over 12 words must be rejected",
   );
-  const fullerSummary = `${Array.from({ length: 41 }, () => "עובדה").join(" ")}. ${Array.from({ length: 40 }, () => "פרט").join(" ")}.`;
+  const fullerSummary = `${Array.from({ length: 41 }, () => "המסמך מפרט שינוי חשוב במדיניות").join(", ")}. ${Array.from({ length: 40 }, () => "העדכון חל על תנאי המימון במשק").join(", ")}.`;
   assert.equal(
     news.parseAnalysis(
       { stories: [{ ...valid, summary: fullerSummary }] },
@@ -343,17 +429,11 @@ test("analysis rejects foreign IDs/non-Hebrew text and normalizes importance and
   );
   assert.deepEqual(
     news.parseAnalysis(
-      {
-        stories: [{
-          ...valid,
-          whyItMatters: "האירוע חשוב.",
-          marketImpact: "האירוע חשוב.",
-        }],
-      },
+      { stories: [{ ...valid, marketImpact: valid.whyItMatters }] },
       candidates,
-    ),
-    [],
-    "duplicate why-it-matters and impact text is rejected",
+    )[0]?.marketImpact,
+    "",
+    "a repeated impact is omitted without discarding the useful story",
   );
   assert.deepEqual(news.parseAnalysis(null, candidates), []);
   assert.deepEqual(

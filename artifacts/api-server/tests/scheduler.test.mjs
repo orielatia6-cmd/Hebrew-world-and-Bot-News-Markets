@@ -15,14 +15,18 @@ function assertBalancedTelegramHtml(text) {
   assert.deepEqual(stack, [], "all HTML tags must close within the same Telegram message");
 }
 
-async function schedulerFixture(t) {
+async function schedulerFixture(t, refreshBehavior = null) {
   const f = fixture();
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-07-01T05:00:00Z") }); // 08:00 Israel summer slot
   let refreshes = 0;
   let sendAttempts = 0;
   const scheduler = await load("lib/briefing/scheduler.ts", {
     ...f.mocks,
-    news: { refreshNews: async () => { refreshes++; return { fetched: 0, analyzed: 0, newStories: 0 }; } },
+    news: { refreshNews: async () => {
+      refreshes++;
+      if (refreshBehavior) return refreshBehavior();
+      return { fetched: 0, analyzed: 0, newStories: 0 };
+    } },
     telegram: { sendTelegramMessage: async (chatId, text, parseMode) => {
       sendAttempts++;
       if (f.failSend || f.failOnSendAttempt === sendAttempts) throw new Error("Telegram unavailable");
@@ -76,6 +80,36 @@ test("scheduled slot waits for its boundary after the prior slot; only recent el
   assert.equal(await dispatchPendingStories(), 0);
 });
 
+test("AI failure never sends malformed cached analysis, while acceptable stored news can still deliver", async (t) => {
+  const { f, schedulerTick } = await schedulerFixture(
+    t,
+    async () => { throw new Error("OpenAI unavailable"); },
+  );
+  f.stories.push(
+    {
+      ...story(1, 5),
+      title: "שיא הרווחים תלוי בכמה מניות בודדות, לפי WSJ",
+      summary: "דיווח הבום ברווחי החברות נשען באופן WSJ כבד על מספר מועט של מניות. הכותרת מצביעה על ריכוזיות בתרומת הרווחים לשוק.",
+      whyItMatters: "הכותרת מצביעה על ריכוזיות בתרומת הרווחים לשוק.",
+    },
+    {
+      ...story(2, 4),
+      title: "הבנק המרכזי פרסם החלטת מדיניות",
+      summary: "הבנק המרכזי פרסם החלטה חדשה לאחר ישיבתו. המסמך מפרט את מועד התחולה.",
+      whyItMatters: "ההחלטה משנה את עלות האשראי במשק ומבהירה את תנאי המימון הקרובים.",
+      marketImpact: "",
+    },
+  );
+
+  await schedulerTick();
+  assert.equal(f.sent.length, 1);
+  assert.match(f.sent[0].text, /הבנק המרכזי/);
+  assert.doesNotMatch(f.sent[0].text, /WSJ|הכותרת מצביעה|דיווח הבום/u);
+  assert.equal(f.stories[0].deliveredAt, null, "malformed legacy copy stays undelivered");
+  assert.ok(f.stories[1].deliveredAt instanceof Date, "good cached copy remains deliverable");
+  assert.ok(f.warnings.some((args) => JSON.stringify(args).includes("Skipped stored stories")));
+});
+
 test("each story is one concise Hebrew message with factual sections and a clickable source", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   f.stories.push(
@@ -83,7 +117,7 @@ test("each story is one concise Hebrew message with factual sections and a click
       ...story(1, 5),
       category: "markets",
       title: "כותרת <שוק> & בדיקה",
-      summary: "המקור מתאר התפתחות בשוק. בדיווח מופיעים פרטים נוספים.",
+      summary: "החברה פרסמה עדכון לתחזית ההכנסות. ההודעה כוללת פרטים על הפעילות ברבעון האחרון.",
       whyItMatters: "ההתפתחות עשויה להשפיע על ציפיות המשקיעים.",
       marketImpact: "מניות השבבים עשויות להגיב בהתאם לפרטי ההודעה.",
       sentiment: "positive",
@@ -95,9 +129,9 @@ test("each story is one concise Hebrew message with factual sections and a click
       ...story(2, 4),
       category: "world",
       title: "התפתחות אזרחית",
-      summary: "המקור מדווח על התפתחות אזרחית. פרטים נוספים מופיעים בדיווח.",
-      whyItMatters: "ההתפתחות עשויה להשפיע על הקהילה המקומית.",
-      marketImpact: "אין קשר ישיר לשוק על סמך המידע הזמין.",
+      summary: "העירייה פתחה מרכז סיוע לתושבים שנפגעו מההצפות. השירות יפעל במרכז הקהילתי.",
+      whyItMatters: "המרכז יספק לתושבים סיוע נגיש בימים הקרובים.",
+      marketImpact: "",
       sentiment: "neutral",
       tickers: [],
     },
@@ -143,6 +177,31 @@ test("each story is one concise Hebrew message with factual sections and a click
   assert.doesNotMatch(financialMessage.text, /המלצה|קנייה|מכירה/);
 });
 
+test("the earnings-concentration example keeps facts, context, market analysis, and publisher attribution separate", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  f.stories.push({
+    ...story(1, 5),
+    category: "markets",
+    title: "מספר מצומצם של חברות מוביל את צמיחת הרווחים במדד",
+    summary: "חלק ניכר מצמיחת הרווחים במדד מגיע ממספר מצומצם של חברות. הקטע הזמין אינו מפרט את שמותיהן או את היקף התרומה.",
+    whyItMatters: "הנתון מלמד שהצמיחה ברווחי המדד אינה מתפזרת באופן שווה בין החברות.",
+    marketImpact: "אם החברות המובילות יאכזבו, תחזיות הרווח של המדד עלולות להיחלש.",
+    sourceName: "The Wall Street Journal",
+    url: "https://www.wsj.com/articles/example",
+  });
+
+  assert.equal(await dispatchPendingStories(), 1);
+  const message = f.sent[0].text;
+  const body = message.split("\n\n🔗 ")[0];
+  assert.match(message, /<b>📊 מספר מצומצם של חברות מוביל את צמיחת הרווחים במדד<\/b>/u);
+  assert.match(message, /📰 <b>מה קרה:<\/b>/u);
+  assert.match(message, /🧠 <b>למה זה חשוב:<\/b>/u);
+  assert.match(message, /📈 <b>השפעה אפשרית:<\/b>/u);
+  assert.match(message, /🔗 <a href="https:\/\/www\.wsj\.com\/articles\/example">מקור: The Wall Street Journal<\/a>/u);
+  assert.doesNotMatch(body, /WSJ|Wall Street Journal|הכותרת מצביעה|דיווח הבום/u);
+  assert.doesNotMatch(message, /🕒|שעון ישראל|\n{3,}/u);
+});
+
 test("long headlines are compacted and exact headline echoes are removed", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   const longHeadline =
@@ -150,7 +209,7 @@ test("long headlines are compacted and exact headline echoes are removed", async
   f.stories.push({
     ...story(1, 4),
     title: longHeadline,
-    summary: `${longHeadline}. הדיווח כולל גם נתונים על היקף ההכנסות.`,
+    summary: `${longHeadline}. פרטי המדיניות נכללו בהודעה שפורסמה למשקיעים.`,
   });
 
   assert.equal(await dispatchPendingStories(), 1);
@@ -158,7 +217,7 @@ test("long headlines are compacted and exact headline echoes are removed", async
   const title = message.match(/<b>(.*?)<\/b>/u)?.[1] ?? "";
   assert.ok(title.endsWith("…"));
   assert.ok(title.split(/\s+/u).filter(Boolean).length <= 12);
-  assert.ok(message.includes("הדיווח כולל גם נתונים על היקף ההכנסות."));
+  assert.ok(message.includes("פרטי המדיניות נכללו בהודעה שפורסמה למשקיעים."));
   assert.ok(!message.includes(longHeadline));
   assert.doesNotMatch(message, /\n{3,}/);
   assertBalancedTelegramHtml(message);
@@ -204,7 +263,7 @@ test("market impact is omitted unless it is specific and relevant to the story",
       category: "markets",
       title: "הפד פרסם הודעה",
       summary: "הבנק המרכזי פרסם הודעה לאחר ישיבתו. הוא לא שינה את הריבית.",
-      whyItMatters: "ההודעה מספקת למשקיעים מידע על עמדת הבנק.",
+      whyItMatters: "היעדר שינוי בריבית משאיר את עלויות המימון ברמה הנוכחית לעת עתה.",
       marketImpact: "ההודעה עשויה להשפיע על השוק.",
     },
   );
