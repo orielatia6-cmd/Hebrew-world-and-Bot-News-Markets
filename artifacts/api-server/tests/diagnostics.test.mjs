@@ -86,19 +86,25 @@ test("migration preflight is read-only and permits only a duplicate-free full up
     }
     if (sql.includes("information_schema.columns")) return { rows: [] };
     if (sql.includes("FROM pg_indexes")) {
-      return [{
+      return {
         rows: [{
           tablename: "briefing_stories",
           indexname: diagnostics.legacySourceIndex,
           indexdef: "CREATE UNIQUE INDEX briefing_stories_source_id_unique ON briefing_stories (source_id)",
         }],
-      }][0];
+      };
     }
     if (sql.includes("FROM pg_constraint")) {
       return { rows: [{ index_owned_by_constraint: false }] };
     }
     if (sql.includes("COUNT(*)")) {
-      return { rows: [{ stories_to_backfill: "12", has_duplicate_source_ids: false }] };
+      return {
+        rows: [{
+          stories_to_backfill: "12",
+          invalid_legacy_values: "0",
+          has_duplicate_source_ids: false,
+        }],
+      };
     }
     throw new Error("Unexpected query");
   });
@@ -109,6 +115,7 @@ test("migration preflight is read-only and permits only a duplicate-free full up
   assert.equal(result.legacySourceUniqueIndexPresent, true);
   assert.equal(result.legacySourceIndexOwnedByConstraint, false);
   assert.equal(result.hasDuplicateSourceIds, false);
+  assert.equal(result.invalidLegacyValues, 0);
   assert.equal(result.storiesToBackfill, 12);
   assert.ok(calls.every(({ sql }) => /^\s*SELECT\b/i.test(sql)));
 });
@@ -123,7 +130,13 @@ test("migration preflight blocks source-id duplicates and partial schema states"
     if (sql.includes("FROM pg_constraint")) {
       return { rows: [{ index_owned_by_constraint: false }] };
     }
-    return { rows: [{ stories_to_backfill: "3", has_duplicate_source_ids: true }] };
+    return {
+      rows: [{
+        stories_to_backfill: "3",
+        invalid_legacy_values: "0",
+        has_duplicate_source_ids: true,
+      }],
+    };
   });
   assert.equal(duplicateResult.decision, "blocked");
   assert.equal(duplicateResult.hasDuplicateSourceIds, true);
@@ -139,7 +152,13 @@ test("migration preflight blocks source-id duplicates and partial schema states"
     if (sql.includes("FROM pg_constraint")) {
       return { rows: [{ index_owned_by_constraint: false }] };
     }
-    return { rows: [{ stories_to_backfill: "3", has_duplicate_source_ids: false }] };
+    return {
+      rows: [{
+        stories_to_backfill: "3",
+        invalid_legacy_values: "0",
+        has_duplicate_source_ids: false,
+      }],
+    };
   });
   assert.equal(partialResult.decision, "blocked");
   assert.deepEqual(partialResult.presentTargetColumns, ["briefing_stories.revision_key"]);

@@ -226,14 +226,14 @@ export async function inspectMigrationPreflight(
   const constraintResult = await query(
     `SELECT EXISTS (
        SELECT 1
-         FROM pg_constraint AS constraints
-         JOIN pg_class AS index_class
-           ON index_class.oid = constraints.conindid
-         JOIN pg_namespace AS schema
-           ON schema.oid = index_class.relnamespace
-        WHERE schema.nspname = current_schema()
-          AND index_class.relname = $1
-          AND constraints.contype IN ('p', 'u')
+         FROM pg_constraint AS c
+         JOIN pg_class AS idx
+           ON idx.oid = c.conindid
+         JOIN pg_namespace AS ns
+           ON ns.oid = idx.relnamespace
+        WHERE ns.nspname = current_schema()
+          AND idx.relname = $1
+          AND c.contype IN ('p', 'u')
      ) AS index_owned_by_constraint`,
     [legacySourceIndex],
   );
