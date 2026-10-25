@@ -34,6 +34,7 @@ async function buildAll() {
       "*.node",
       "@mozilla/readability",
       "jsdom",
+      "js-tiktoken",
       "sharp",
       "better-sqlite3",
       "sqlite3",

@@ -6,6 +6,7 @@ const ALLOWED_PUBLISHER_DOMAINS = [
   "bbc.com",
   "bbc.co.uk",
   "theguardian.com",
+  "fool.com",
   "yahoo.com",
 ] as const;
 

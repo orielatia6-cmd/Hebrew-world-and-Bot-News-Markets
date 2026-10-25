@@ -39,14 +39,19 @@ function escapeHtml(value: string): string {
 
 function sourceLinkLabel(sourceName: string, sourceUrl: URL): string {
   const rssOnly = /תקציר RSS בלבד/u.test(sourceName);
-  const cleanName = sourceName.replace(/\s*·\s*תקציר RSS בלבד/u, "").trim();
+  const partialArticle = /גוף כתבה חלקי/u.test(sourceName);
+  const cleanName = sourceName
+    .replace(/\s*·\s*תקציר RSS בלבד/u, "")
+    .replace(/\s*·\s*גוף כתבה חלקי/u, "")
+    .trim();
   let label = cleanName;
   if (sourceUrl.hostname === "news.google.com") {
     label = /google news/i.test(cleanName)
       ? "Google News"
       : `${cleanName} · דרך Google News`;
   }
-  return rssOnly ? `${label} · תקציר RSS בלבד` : label;
+  if (rssOnly) return `${label} · תקציר RSS בלבד`;
+  return partialArticle ? `${label} · גוף כתבה חלקי` : label;
 }
 
 function compactHeadline(title: string): string {

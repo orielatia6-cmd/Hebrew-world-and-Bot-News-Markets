@@ -2,6 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, load } from "./harness.mjs";
 
+const { ANALYSIS_INPUT_TOKEN_LIMIT, countChatInputTokens } =
+  await load("lib/briefing/prompt-budget.ts", {});
+
 function professionalStory(sourceId, overrides = {}) {
   return {
     sourceId,
@@ -141,6 +144,7 @@ test("opt-in article context is capped, paraphrase-only, and falls back to RSS f
   const articleReads = [];
   let aiCalls = 0;
   let requestItems = [];
+  let aiRequestMessages = [];
   t.mock.method(globalThis, "fetch", async () => ({
     ok: true,
     text: async () => "fixture feed",
@@ -174,9 +178,14 @@ test("opt-in article context is capped, paraphrase-only, and falls back to RSS f
     openai: { default: class {
       chat = { completions: { create: async (request) => {
         aiCalls += 1;
+        aiRequestMessages = request.messages;
         requestItems = JSON.parse(request.messages.find((message) => message.role === "user").content);
         assert.equal(request.model, "gpt-5-mini");
         assert.equal(request.max_completion_tokens, 8192);
+        assert.ok(
+          countChatInputTokens(request.messages) <= ANALYSIS_INPUT_TOKEN_LIMIT,
+          "the serialized model input remains within the fixed token cap",
+        );
         assert.match(request.messages[0].content, /פרפרזה קצרה בלבד/u);
         assert.match(request.messages[0].content, /אל תתרגם או תשחזר את הכתבה כולה/u);
         return { choices: [{ message: { content: JSON.stringify({
@@ -190,6 +199,7 @@ test("opt-in article context is capped, paraphrase-only, and falls back to RSS f
   assert.equal(result.newStories, 3);
   assert.equal(articleReads.length, 1, "no more than one candidate page is fetched per refresh");
   assert.equal(aiCalls, 1, "full text uses the existing analysis call");
+  assert.ok(aiRequestMessages.length > 0);
   assert.equal(requestItems.filter((item) => item.materialScope.startsWith("Full article")).length, 1);
   assert.equal(requestItems.filter((item) => item.materialScope.startsWith("RSS title")).length, 2);
   assert.ok(requestItems.some((item) => item.excerpt.startsWith("FULL ARTICLE BODY:")));
