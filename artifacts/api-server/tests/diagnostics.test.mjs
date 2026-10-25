@@ -164,23 +164,40 @@ test("migration preflight blocks source-id duplicates and partial schema states"
   assert.deepEqual(partialResult.presentTargetColumns, ["briefing_stories.revision_key"]);
 });
 
-test("read-only delivery audit reports aggregate Telegram delivery timestamps", async () => {
+test("read-only delivery audit reports delivery, pause, source, and pending-story aggregates", async () => {
   const calls = [];
   const result = await diagnostics.inspectDeliveryActivity(async (sql, values) => {
     calls.push({ sql, values });
-    if (sql.includes("COUNT(*) FILTER")) {
+    if (sql.includes("FROM briefing_stories")) {
       return {
         rows: [{
           delivered_in_window: "2",
           latest_delivery_at: new Date("2026-10-25T09:00:00.000Z"),
+          recent_undelivered_stories: "4",
+          recent_eligible_undelivered_stories: "1",
         }],
       };
     }
     if (sql.includes("FROM briefing_settings")) {
       return {
         rows: [{
+          enabled: true,
+          telegram_chat_configured: true,
+          last_scheduler_error_present: false,
+          min_importance: 4,
+          last_checked_at: new Date("2026-10-25T09:01:00.000Z"),
           last_sent_at: new Date("2026-10-25T08:59:00.000Z"),
           last_processed_digest_slot_at: new Date("2026-10-25T09:00:00.000Z"),
+        }],
+      };
+    }
+    if (sql.includes("FROM briefing_feed_health")) {
+      return {
+        rows: [{
+          configured_feeds: "11",
+          feeds_succeeded_in_window: "10",
+          feeds_failed_in_window: "1",
+          latest_feed_success_at: new Date("2026-10-25T09:02:00.000Z"),
         }],
       };
     }
@@ -193,9 +210,20 @@ test("read-only delivery audit reports aggregate Telegram delivery timestamps", 
     latestStoryDeliveryAt: "2026-10-25T09:00:00.000Z",
     lastDigestSentAt: "2026-10-25T08:59:00.000Z",
     lastProcessedDigestSlotAt: "2026-10-25T09:00:00.000Z",
+    lastCheckedAt: "2026-10-25T09:01:00.000Z",
+    briefingEnabled: true,
+    telegramChatConfigured: true,
+    lastSchedulerErrorPresent: false,
+    minImportance: 4,
+    configuredFeeds: 11,
+    feedsSucceededInWindow: 10,
+    feedsFailedInWindow: 1,
+    latestFeedSuccessAt: "2026-10-25T09:02:00.000Z",
+    recentUndeliveredStories: 4,
+    recentEligibleUndeliveredStories: 1,
   });
   assert.ok(calls.every(({ sql }) => /^\s*SELECT\b/i.test(sql)));
-  assert.deepEqual(calls.map(({ values }) => values), [[30], []]);
+  assert.deepEqual(calls.map(({ values }) => values), [[30], [], [30]]);
   await assert.rejects(
     diagnostics.inspectDeliveryActivity(async () => ({ rows: [] }), 0),
     RangeError,

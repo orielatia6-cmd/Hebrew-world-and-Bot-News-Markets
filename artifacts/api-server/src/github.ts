@@ -34,6 +34,17 @@ async function checkRecentDeliveryReadOnly(): Promise<void> {
         `latest_story_delivery_at=${inspection.latestStoryDeliveryAt ?? "none"}`,
         `last_digest_sent_at=${inspection.lastDigestSentAt ?? "none"}`,
         `last_digest_slot_processed_at=${inspection.lastProcessedDigestSlotAt ?? "none"}`,
+        `briefing_enabled=${inspection.briefingEnabled ?? "unknown"}`,
+        `telegram_chat_configured=${inspection.telegramChatConfigured}`,
+        `last_scheduler_error_present=${inspection.lastSchedulerErrorPresent}`,
+        `min_importance=${inspection.minImportance ?? "unknown"}`,
+        `last_checked_at=${inspection.lastCheckedAt ?? "none"}`,
+        `feeds_configured=${inspection.configuredFeeds}`,
+        `feeds_succeeded_in_window=${inspection.feedsSucceededInWindow}`,
+        `feeds_failed_in_window=${inspection.feedsFailedInWindow}`,
+        `latest_feed_success_at=${inspection.latestFeedSuccessAt ?? "none"}`,
+        `recent_undelivered_stories=${inspection.recentUndeliveredStories}`,
+        `recent_eligible_undelivered_stories=${inspection.recentEligibleUndeliveredStories}`,
       ].join(" "),
     );
   } catch (error) {

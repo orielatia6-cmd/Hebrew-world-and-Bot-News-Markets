@@ -301,6 +301,17 @@ export type DeliveryActivityInspection = {
   latestStoryDeliveryAt: string | null;
   lastDigestSentAt: string | null;
   lastProcessedDigestSlotAt: string | null;
+  lastCheckedAt: string | null;
+  briefingEnabled: boolean | null;
+  telegramChatConfigured: boolean;
+  lastSchedulerErrorPresent: boolean;
+  minImportance: number | null;
+  configuredFeeds: number;
+  feedsSucceededInWindow: number;
+  feedsFailedInWindow: number;
+  latestFeedSuccessAt: string | null;
+  recentUndeliveredStories: number;
+  recentEligibleUndeliveredStories: number;
 };
 
 function isoTimestamp(value: unknown): string | null {
@@ -320,28 +331,80 @@ export async function inspectDeliveryActivity(
     `SELECT COUNT(*) FILTER (
               WHERE delivered_at >= NOW() - ($1::int * INTERVAL '1 minute')
             )::bigint AS delivered_in_window,
-            MAX(delivered_at) AS latest_delivery_at
+            MAX(delivered_at) AS latest_delivery_at,
+            COUNT(*) FILTER (
+              WHERE delivered_at IS NULL
+                AND published_at >= NOW() - INTERVAL '24 hours'
+            )::bigint AS recent_undelivered_stories,
+            COUNT(*) FILTER (
+              WHERE delivered_at IS NULL
+                AND published_at >= NOW() - INTERVAL '24 hours'
+                AND importance >= COALESCE(
+                  (SELECT min_importance FROM briefing_settings WHERE id = 1),
+                  4
+                )
+            )::bigint AS recent_eligible_undelivered_stories
        FROM briefing_stories`,
     [windowMinutes],
   );
   const settingsResult = await query(
-    `SELECT last_sent_at, last_processed_digest_slot_at
+    `SELECT enabled,
+            (telegram_chat_id IS NOT NULL AND btrim(telegram_chat_id) <> '') AS telegram_chat_configured,
+            (last_error IS NOT NULL) AS last_scheduler_error_present,
+            min_importance,
+            last_checked_at,
+            last_sent_at,
+            last_processed_digest_slot_at
        FROM briefing_settings
       WHERE id = 1`,
     [],
   );
+  const feedResult = await query(
+    `SELECT COUNT(*)::bigint AS configured_feeds,
+            COUNT(*) FILTER (
+              WHERE last_successful_fetch >= NOW() - ($1::int * INTERVAL '1 minute')
+            )::bigint AS feeds_succeeded_in_window,
+            COUNT(*) FILTER (
+              WHERE last_attempt_at >= NOW() - ($1::int * INTERVAL '1 minute')
+                AND last_error IS NOT NULL
+            )::bigint AS feeds_failed_in_window,
+            MAX(last_successful_fetch) AS latest_feed_success_at
+       FROM briefing_feed_health`,
+    [windowMinutes],
+  );
   const storyRow = storyResult.rows[0] ?? {};
   const settingsRow = settingsResult.rows[0] ?? {};
-  const storiesDeliveredInWindow = Number(storyRow.delivered_in_window);
+  const feedRow = feedResult.rows[0] ?? {};
+  const count = (value: unknown) => {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+  };
   return {
     windowMinutes,
-    storiesDeliveredInWindow: Number.isFinite(storiesDeliveredInWindow)
-      ? storiesDeliveredInWindow
-      : 0,
+    storiesDeliveredInWindow: count(storyRow.delivered_in_window),
     latestStoryDeliveryAt: isoTimestamp(storyRow.latest_delivery_at),
     lastDigestSentAt: isoTimestamp(settingsRow.last_sent_at),
     lastProcessedDigestSlotAt: isoTimestamp(
       settingsRow.last_processed_digest_slot_at,
+    ),
+    lastCheckedAt: isoTimestamp(settingsRow.last_checked_at),
+    briefingEnabled:
+      typeof settingsRow.enabled === "boolean" ? settingsRow.enabled : null,
+    telegramChatConfigured: settingsRow.telegram_chat_configured === true,
+    lastSchedulerErrorPresent:
+      settingsRow.last_scheduler_error_present === true,
+    minImportance:
+      Number.isSafeInteger(Number(settingsRow.min_importance)) &&
+      Number(settingsRow.min_importance) >= 0
+        ? Number(settingsRow.min_importance)
+        : null,
+    configuredFeeds: count(feedRow.configured_feeds),
+    feedsSucceededInWindow: count(feedRow.feeds_succeeded_in_window),
+    feedsFailedInWindow: count(feedRow.feeds_failed_in_window),
+    latestFeedSuccessAt: isoTimestamp(feedRow.latest_feed_success_at),
+    recentUndeliveredStories: count(storyRow.recent_undelivered_stories),
+    recentEligibleUndeliveredStories: count(
+      storyRow.recent_eligible_undelivered_stories,
     ),
   };
 }
