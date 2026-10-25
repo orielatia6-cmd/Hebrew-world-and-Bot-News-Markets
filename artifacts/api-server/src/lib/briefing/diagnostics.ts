@@ -295,6 +295,57 @@ export async function inspectMigrationPreflight(
   };
 }
 
+export type DeliveryActivityInspection = {
+  windowMinutes: number;
+  storiesDeliveredInWindow: number;
+  latestStoryDeliveryAt: string | null;
+  lastDigestSentAt: string | null;
+  lastProcessedDigestSlotAt: string | null;
+};
+
+function isoTimestamp(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+export async function inspectDeliveryActivity(
+  query: SchemaQuery,
+  windowMinutes = 30,
+): Promise<DeliveryActivityInspection> {
+  if (!Number.isInteger(windowMinutes) || windowMinutes < 1 || windowMinutes > 1440) {
+    throw new RangeError("Delivery audit window must be between 1 and 1440 minutes.");
+  }
+  const storyResult = await query(
+    `SELECT COUNT(*) FILTER (
+              WHERE delivered_at >= NOW() - ($1::int * INTERVAL '1 minute')
+            )::bigint AS delivered_in_window,
+            MAX(delivered_at) AS latest_delivery_at
+       FROM briefing_stories`,
+    [windowMinutes],
+  );
+  const settingsResult = await query(
+    `SELECT last_sent_at, last_processed_digest_slot_at
+       FROM briefing_settings
+      WHERE id = 1`,
+    [],
+  );
+  const storyRow = storyResult.rows[0] ?? {};
+  const settingsRow = settingsResult.rows[0] ?? {};
+  const storiesDeliveredInWindow = Number(storyRow.delivered_in_window);
+  return {
+    windowMinutes,
+    storiesDeliveredInWindow: Number.isFinite(storiesDeliveredInWindow)
+      ? storiesDeliveredInWindow
+      : 0,
+    latestStoryDeliveryAt: isoTimestamp(storyRow.latest_delivery_at),
+    lastDigestSentAt: isoTimestamp(settingsRow.last_sent_at),
+    lastProcessedDigestSlotAt: isoTimestamp(
+      settingsRow.last_processed_digest_slot_at,
+    ),
+  };
+}
+
 export function safeErrorSummary(error: unknown): string {
   const chain: unknown[] = [];
   let current = error;

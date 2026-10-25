@@ -5,6 +5,7 @@ import { runScheduledJob } from "./lib/briefing/scheduler";
 import { digestSlot } from "./lib/briefing/schedule";
 import { getTelegramBotUsername, pollTelegramUpdatesOnce } from "./lib/briefing/telegram";
 import {
+  inspectDeliveryActivity,
   inspectMigrationPreflight,
   inspectBriefingSchema,
   safeErrorSummary,
@@ -12,8 +13,41 @@ import {
 
 const ADVISORY_LOCK_ID = 7_842_190_631;
 const schemaCheckMode = process.argv.includes("--schema-check");
+const deliveryAuditMode = process.argv.includes("--delivery-audit");
 const migrationPreflightMode = process.argv.includes("--migration-preflight");
 const applyMigrationMode = process.argv.includes("--apply-news-quality-migration");
+
+async function checkRecentDeliveryReadOnly(): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN READ ONLY");
+    await client.query("SET LOCAL statement_timeout = 5000");
+    const inspection = await inspectDeliveryActivity(async (sql, values) => {
+      const result = await client.query(sql, [...values]);
+      return { rows: result.rows as Array<Record<string, unknown>> };
+    });
+    await client.query("COMMIT");
+    console.log(
+      [
+        `delivery_audit_window_minutes=${inspection.windowMinutes}`,
+        `stories_delivered_in_window=${inspection.storiesDeliveredInWindow}`,
+        `latest_story_delivery_at=${inspection.latestStoryDeliveryAt ?? "none"}`,
+        `last_digest_sent_at=${inspection.lastDigestSentAt ?? "none"}`,
+        `last_digest_slot_processed_at=${inspection.lastProcessedDigestSlotAt ?? "none"}`,
+      ].join(" "),
+    );
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Preserve the original, sanitized diagnostic.
+    }
+    throw error;
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
 
 async function runReadOnlyMigrationPreflight(): Promise<void> {
   const client = await pool.connect();
@@ -174,6 +208,10 @@ async function checkDatabaseSchemaReadOnly(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (deliveryAuditMode) {
+    await checkRecentDeliveryReadOnly();
+    return;
+  }
   if (migrationPreflightMode) {
     await runReadOnlyMigrationPreflight();
     return;
@@ -225,6 +263,8 @@ main().catch((error: unknown) => {
     ? "Read-only migration preflight failed"
     : applyMigrationMode
       ? "Additive news-quality migration failed"
+      : deliveryAuditMode
+        ? "Read-only delivery audit failed"
       : schemaCheckMode
         ? "Read-only database schema check failed"
         : "Scheduled Telegram job failed";

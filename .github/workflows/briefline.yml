@@ -14,6 +14,7 @@ on:
         options:
           - scheduled
           - schema-check
+          - delivery-audit
           - migration-preflight
           - apply-news-quality-migration
         default: scheduled
@@ -48,6 +49,11 @@ jobs:
       - name: Read-only database schema check
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'schema-check' }}
         run: node artifacts/api-server/dist/github.mjs --schema-check
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Read-only recent-delivery audit
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'delivery-audit' }}
+        run: node artifacts/api-server/dist/github.mjs --delivery-audit
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Read-only migration preflight

@@ -163,3 +163,41 @@ test("migration preflight blocks source-id duplicates and partial schema states"
   assert.equal(partialResult.decision, "blocked");
   assert.deepEqual(partialResult.presentTargetColumns, ["briefing_stories.revision_key"]);
 });
+
+test("read-only delivery audit reports aggregate Telegram delivery timestamps", async () => {
+  const calls = [];
+  const result = await diagnostics.inspectDeliveryActivity(async (sql, values) => {
+    calls.push({ sql, values });
+    if (sql.includes("COUNT(*) FILTER")) {
+      return {
+        rows: [{
+          delivered_in_window: "2",
+          latest_delivery_at: new Date("2026-10-25T09:00:00.000Z"),
+        }],
+      };
+    }
+    if (sql.includes("FROM briefing_settings")) {
+      return {
+        rows: [{
+          last_sent_at: new Date("2026-10-25T08:59:00.000Z"),
+          last_processed_digest_slot_at: new Date("2026-10-25T09:00:00.000Z"),
+        }],
+      };
+    }
+    throw new Error("Unexpected query");
+  });
+
+  assert.deepEqual(result, {
+    windowMinutes: 30,
+    storiesDeliveredInWindow: 2,
+    latestStoryDeliveryAt: "2026-10-25T09:00:00.000Z",
+    lastDigestSentAt: "2026-10-25T08:59:00.000Z",
+    lastProcessedDigestSlotAt: "2026-10-25T09:00:00.000Z",
+  });
+  assert.ok(calls.every(({ sql }) => /^\s*SELECT\b/i.test(sql)));
+  assert.deepEqual(calls.map(({ values }) => values), [[30], []]);
+  await assert.rejects(
+    diagnostics.inspectDeliveryActivity(async () => ({ rows: [] }), 0),
+    RangeError,
+  );
+});
