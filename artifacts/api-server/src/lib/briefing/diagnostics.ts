@@ -76,10 +76,12 @@ export type MigrationPreflight = {
   missingTables: string[];
   presentTargetColumns: string[];
   presentTargetIndexes: string[];
+  invalidTargetIndexes: string[];
   conflictingIndexLocations: string[];
   legacySourceUniqueIndexPresent: boolean;
   legacySourceIndexOwnedByConstraint: boolean;
   hasDuplicateSourceIds: boolean | null;
+  invalidLegacyValues: number | null;
   storiesToBackfill: number | null;
   decision: "ready" | "already-applied" | "blocked";
 };
@@ -146,10 +148,12 @@ export async function inspectMigrationPreflight(
       missingTables,
       presentTargetColumns: [],
       presentTargetIndexes: [],
+      invalidTargetIndexes: [],
       conflictingIndexLocations: [],
       legacySourceUniqueIndexPresent: false,
       legacySourceIndexOwnedByConstraint: false,
       hasDuplicateSourceIds: null,
+      invalidLegacyValues: null,
       storiesToBackfill: null,
       decision: "blocked",
     };
@@ -192,7 +196,16 @@ export async function inspectMigrationPreflight(
     indexResult.rows.some(
       (row) =>
         String(row.indexname) === index &&
-        String(row.tablename) === "briefing_stories",
+        String(row.tablename) === "briefing_stories" &&
+        /^CREATE UNIQUE INDEX/i.test(String(row.indexdef)),
+    ),
+  );
+  const invalidTargetIndexes = requiredBriefingIndexes.filter((index) =>
+    indexResult.rows.some(
+      (row) =>
+        String(row.indexname) === index &&
+        String(row.tablename) === "briefing_stories" &&
+        !/^CREATE UNIQUE INDEX/i.test(String(row.indexdef)),
     ),
   );
   const conflictingIndexLocations = indexResult.rows
@@ -230,6 +243,9 @@ export async function inspectMigrationPreflight(
 
   const rowResult = await query(
     `SELECT COUNT(*)::bigint AS stories_to_backfill,
+            COUNT(*) FILTER (
+              WHERE source_id IS NULL OR title IS NULL
+            )::bigint AS invalid_legacy_values,
             EXISTS (
               SELECT 1
                 FROM briefing_stories
@@ -246,6 +262,7 @@ export async function inspectMigrationPreflight(
       ? row.stories_to_backfill
       : Number(row.stories_to_backfill);
   const hasDuplicateSourceIds = Boolean(row.has_duplicate_source_ids);
+  const invalidLegacyValues = Number(row.invalid_legacy_values);
   const alreadyApplied =
     presentTargetColumns.length === allTargetColumns.length &&
     presentTargetIndexes.length === requiredBriefingIndexes.length &&
@@ -253,18 +270,24 @@ export async function inspectMigrationPreflight(
   const readyToApply =
     presentTargetColumns.length === 0 &&
     presentTargetIndexes.length === 0 &&
+    invalidTargetIndexes.length === 0 &&
     conflictingIndexLocations.length === 0 &&
     !legacySourceIndexOwnedByConstraint &&
-    !hasDuplicateSourceIds;
+    !hasDuplicateSourceIds &&
+    invalidLegacyValues === 0;
 
   return {
     missingTables,
     presentTargetColumns,
     presentTargetIndexes,
+    invalidTargetIndexes,
     conflictingIndexLocations,
     legacySourceUniqueIndexPresent,
     legacySourceIndexOwnedByConstraint,
     hasDuplicateSourceIds: hasDuplicateSourceIds,
+    invalidLegacyValues: Number.isFinite(invalidLegacyValues)
+      ? invalidLegacyValues
+      : null,
     storiesToBackfill: Number.isFinite(storiesToBackfill)
       ? storiesToBackfill
       : null,

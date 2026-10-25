@@ -17,6 +17,11 @@ on:
           - migration-preflight
           - apply-news-quality-migration
         default: scheduled
+      confirm_news_quality_migration:
+        description: "Set true only to apply the approved additive migration"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -50,8 +55,13 @@ jobs:
         run: node artifacts/api-server/dist/github.mjs --migration-preflight
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Require migration confirmation
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'apply-news-quality-migration' && inputs.confirm_news_quality_migration != true }}
+        run: |
+          echo "Migration was not applied: explicit confirmation input is required."
+          exit 1
       - name: Apply additive migration atomically
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'apply-news-quality-migration' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'apply-news-quality-migration' && inputs.confirm_news_quality_migration == true }}
         run: node artifacts/api-server/dist/github.mjs --apply-news-quality-migration
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

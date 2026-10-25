@@ -46,8 +46,8 @@ async function applyNewsQualityMigrationAtomically(): Promise<void> {
   try {
     await client.query("BEGIN");
     inTransaction = true;
-    await client.query("SET LOCAL statement_timeout = 30000");
-    await client.query("SET LOCAL lock_timeout = 5000");
+    await client.query("SET LOCAL statement_timeout = 120000");
+    await client.query("SET LOCAL lock_timeout = 10000");
     await client.query("SELECT pg_advisory_xact_lock($1)", [ADVISORY_LOCK_ID]);
     await client.query(
       "LOCK TABLE briefing_settings, briefing_stories IN ACCESS EXCLUSIVE MODE",
@@ -129,9 +129,12 @@ function formatMigrationPreflight(preflight: Awaited<ReturnType<typeof inspectMi
     `missing_tables=${preflight.missingTables.length ? preflight.missingTables.join(",") : "none"}`,
     `present_target_columns=${preflight.presentTargetColumns.length ? preflight.presentTargetColumns.join(",") : "none"}`,
     `present_target_indexes=${preflight.presentTargetIndexes.length ? preflight.presentTargetIndexes.join(",") : "none"}`,
+    `invalid_target_indexes=${preflight.invalidTargetIndexes.length ? preflight.invalidTargetIndexes.join(",") : "none"}`,
     `conflicting_indexes=${preflight.conflictingIndexLocations.length ? preflight.conflictingIndexLocations.join(",") : "none"}`,
     `legacy_source_unique_index=${preflight.legacySourceUniqueIndexPresent ? "present" : "absent"}`,
+    `legacy_index_is_constraint=${preflight.legacySourceIndexOwnedByConstraint ? "yes" : "no"}`,
     `duplicate_source_ids=${preflight.hasDuplicateSourceIds === null ? "not-checked" : preflight.hasDuplicateSourceIds ? "yes" : "no"}`,
+    `invalid_legacy_values=${preflight.invalidLegacyValues ?? "not-checked"}`,
     `stories_to_backfill=${preflight.storiesToBackfill ?? "not-checked"}`,
   ].join(" ");
 }
