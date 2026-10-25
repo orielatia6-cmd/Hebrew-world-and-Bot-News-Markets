@@ -8,12 +8,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Run the scheduled bot or a read-only schema check"
+        description: "Choose the scheduled bot or a database-only maintenance action"
         required: true
         type: choice
         options:
           - scheduled
           - schema-check
+          - migration-preflight
+          - apply-news-quality-migration
         default: scheduled
 
 permissions:
@@ -43,8 +45,18 @@ jobs:
         run: node artifacts/api-server/dist/github.mjs --schema-check
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Read-only migration preflight
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'migration-preflight' }}
+        run: node artifacts/api-server/dist/github.mjs --migration-preflight
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Apply additive migration atomically
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'apply-news-quality-migration' }}
+        run: node artifacts/api-server/dist/github.mjs --apply-news-quality-migration
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Run scheduled Telegram job
-        if: ${{ github.event_name == 'schedule' || inputs.mode != 'schema-check' }}
+        if: ${{ github.event_name == 'schedule' || inputs.mode == 'scheduled' }}
         run: node artifacts/api-server/dist/github.mjs
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
