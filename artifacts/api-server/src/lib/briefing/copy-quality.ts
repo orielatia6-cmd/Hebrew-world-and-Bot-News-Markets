@@ -25,7 +25,9 @@ const metaPhrases =
 const literalEnglishPhrases =
   /\b(?:according to|the headline|headline indicates|report says|earnings boom|stocks earnings)\b/iu;
 const genericWhy =
-  /^(?:חשוב|הנושא חשוב|האירוע חשוב|הדבר חשוב|המידע חשוב|יש לכך חשיבות|האירוע משמעותי)[.!?…]*$|^(?:ההודעה|הדיווח|האירוע)\s+מספק(?:ת|ים)? למשקיעים מידע\b/u;
+  /^(?:חשוב|הנושא חשוב|האירוע חשוב|הדבר חשוב|המידע חשוב|יש לכך חשיבות|האירוע משמעותי)[.!?…]*$|^(?:ההודעה|הדיווח|האירוע)\s+מספק(?:ת|ים)? למשקיעים מידע(?:\s|[.!?…]|$)/u;
+const vagueAnalysis =
+  /(?:הרחבת המימון הפעיל בתחום|שינוי חשיפת הסקטור לסיכונים והזדמנויות מימון|חשיפת הסקטור לסיכונים והזדמנויות|הזדמנויות מימון לצד סיכונים|משנה את החשיפה לסיכונים ולהזדמנויות|מייצר הזדמנויות וסיכונים בתחום|(?:חשיפת|חשיפה)\s+.{0,24}סיכונים.{0,24}הזדמנויות)/u;
 const genericImpact =
   /^(?:(?:הדבר|ההודעה|ההתפתחות)\s+)?(?:עשוי|עלול|עלולה)?\s*להשפיע על השוק(?:ים)?(?: באופן כללי)?[.!?…]*$|^(?:השפעה|ההשפעה) על השוק אינה ברורה[.!?…]*$/u;
 
@@ -119,6 +121,7 @@ export function normalizeProfessionalCopy(
     whySentences.length !== 1 ||
     whyItMatters.length < 18 ||
     genericWhy.test(whyItMatters) ||
+    vagueAnalysis.test(whyItMatters) ||
     ![title, ...summarySentences, whyItMatters].every(containsHebrew) ||
     isEditorialMeta(primaryText, input.sourceName) ||
     similarity(summary, whyItMatters) >= 0.72
@@ -133,6 +136,7 @@ export function normalizeProfessionalCopy(
       !containsHebrew(marketImpact) ||
       isEditorialMeta(marketImpact, input.sourceName) ||
       genericImpact.test(marketImpact) ||
+      vagueAnalysis.test(marketImpact) ||
       similarity(whyItMatters, marketImpact) >= 0.56 ||
       similarity(summary, marketImpact) >= 0.72
     )

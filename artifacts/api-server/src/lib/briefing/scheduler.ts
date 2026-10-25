@@ -301,97 +301,166 @@ function splitHtmlMessage(message: string, maxLength: number): string[] {
   return chunks;
 }
 
-async function dispatchPendingStories(force = false, breaking = false): Promise<number> {
-  const settings = await ensureBriefingSettings();
-  if (!settings.enabled || !settings.telegramChatId) return 0;
+type DispatchSummary = {
+  lane: "breaking" | "hourly" | "manual";
+  paused: boolean | null;
+  chatConfigured: boolean;
+  digestSlotDue: boolean;
+  eligibleStories: number;
+  copyQualityRejected: number;
+  selectedStories: number;
+  telegramAttempts: number;
+  telegramAccepted: number;
+  telegramFailures: number;
+  storiesMarkedDelivered: number;
+  skipReason?: "paused" | "chat_unconfigured" | "slot_not_due" | "no_eligible_stories" | "copy_quality";
+};
 
-  const slot = digestSlot(new Date(), settings.lastProcessedDigestSlotAt);
-  if (!force && !breaking && !slot) return 0;
-
-  const eligible = await db
-    .select()
-    .from(briefingStoriesTable)
-    .where(
-      and(
-        isNull(briefingStoriesTable.deliveredAt),
-        gte(briefingStoriesTable.importance, breaking ? 5 : settings.minImportance),
-        gte(briefingStoriesTable.publishedAt, new Date(Date.now() - (breaking ? 2 : 24) * 60 * 60 * 1000)),
-      ),
-    )
-    .orderBy(desc(briefingStoriesTable.importance), desc(briefingStoriesTable.publishedAt))
-    .limit(40);
-  const publishable = eligible.filter(
-    (story) => normalizeProfessionalCopy(story, { legacyStored: true }) !== null,
-  );
-  const skippedForCopyQuality = eligible.length - publishable.length;
-  if (skippedForCopyQuality > 0) {
-    logger.warn(
-      { skipped: skippedForCopyQuality },
-      "Skipped stored stories that failed Hebrew editorial quality checks.",
-    );
-  }
-  const pending = publishable
-    .sort(
-      (left, right) =>
-        right.importance - left.importance ||
-        sourceTrustRank(right.sourceName) - sourceTrustRank(left.sourceName) ||
-        (right.publishedAt?.getTime() ?? 0) - (left.publishedAt?.getTime() ?? 0),
-    )
-    .slice(0, MAX_STORIES_PER_DIGEST);
-
-  if (pending.length === 0) {
-    if (!breaking && !force) {
-      await db
-        .update(briefingSettingsTable)
-        .set({ lastProcessedDigestSlotAt: slot, lastError: null })
-        .where(eq(briefingSettingsTable.id, 1));
+async function dispatchPendingStories(
+  force = false,
+  breaking = false,
+  observe?: (summary: DispatchSummary) => void,
+): Promise<number> {
+  const summary: DispatchSummary = {
+    lane: breaking ? "breaking" : force ? "manual" : "hourly",
+    paused: null,
+    chatConfigured: false,
+    digestSlotDue: false,
+    eligibleStories: 0,
+    copyQualityRejected: 0,
+    selectedStories: 0,
+    telegramAttempts: 0,
+    telegramAccepted: 0,
+    telegramFailures: 0,
+    storiesMarkedDelivered: 0,
+  };
+  try {
+    const settings = await ensureBriefingSettings();
+    summary.paused = !settings.enabled;
+    summary.chatConfigured = Boolean(settings.telegramChatId);
+    if (!settings.enabled) {
+      summary.skipReason = "paused";
+      return 0;
     }
-    return 0;
-  }
+    if (!settings.telegramChatId) {
+      summary.skipReason = "chat_unconfigured";
+      return 0;
+    }
 
-  const messages = pending.flatMap((story) => {
-    const parts = splitHtmlMessage(
-      formatStoryMessage(story, breaking),
-      TELEGRAM_SAFE_LENGTH,
-    );
-    return parts.map((text, index) => ({
-      text,
-      storyId: story.id,
-      finalPart: index === parts.length - 1,
-    }));
-  });
+    const slot = digestSlot(new Date(), settings.lastProcessedDigestSlotAt);
+    summary.digestSlotDue = Boolean(slot);
+    if (!force && !breaking && !slot) {
+      summary.skipReason = "slot_not_due";
+      return 0;
+    }
 
-  for (const message of messages) {
-    await sendTelegramMessage(settings.telegramChatId, message.text, "HTML");
-    if (!message.finalPart) continue;
-    const deliveredAt = new Date();
-    await db
-      .update(briefingStoriesTable)
-      .set({ deliveredAt })
+    const eligible = await db
+      .select()
+      .from(briefingStoriesTable)
       .where(
         and(
-          inStoryIds([message.storyId]),
           isNull(briefingStoriesTable.deliveredAt),
+          gte(briefingStoriesTable.importance, breaking ? 5 : settings.minImportance),
+          gte(briefingStoriesTable.publishedAt, new Date(Date.now() - (breaking ? 2 : 24) * 60 * 60 * 1000)),
         ),
+      )
+      .orderBy(desc(briefingStoriesTable.importance), desc(briefingStoriesTable.publishedAt))
+      .limit(40);
+    summary.eligibleStories = eligible.length;
+    const publishable = eligible.filter(
+      (story) => normalizeProfessionalCopy(story, { legacyStored: true }) !== null,
+    );
+    summary.copyQualityRejected = eligible.length - publishable.length;
+    if (summary.copyQualityRejected > 0) {
+      logger.warn(
+        { skipped: summary.copyQualityRejected },
+        "Skipped stored stories that failed Hebrew editorial quality checks.",
       );
-    await db
-      .update(briefingSettingsTable)
-      .set({
-        ...(!breaking && !force
-          ? { lastSentAt: deliveredAt }
-          : {}),
-        lastError: null,
-      })
-      .where(eq(briefingSettingsTable.id, 1));
-  }
+    }
+    const pending = publishable
+      .sort(
+        (left, right) =>
+          right.importance - left.importance ||
+          sourceTrustRank(right.sourceName) - sourceTrustRank(left.sourceName) ||
+          (right.publishedAt?.getTime() ?? 0) - (left.publishedAt?.getTime() ?? 0),
+      )
+      .slice(0, MAX_STORIES_PER_DIGEST);
+    summary.selectedStories = pending.length;
 
-  if (!breaking && !force && slot) {
-    await db
-      .update(briefingSettingsTable)
-      .set({ lastProcessedDigestSlotAt: slot })
-      .where(eq(briefingSettingsTable.id, 1));
+    if (pending.length === 0) {
+      summary.skipReason =
+        eligible.length === 0
+          ? "no_eligible_stories"
+          : summary.copyQualityRejected > 0
+            ? "copy_quality"
+            : "no_eligible_stories";
+      if (!breaking && !force) {
+        await db
+          .update(briefingSettingsTable)
+          .set({ lastProcessedDigestSlotAt: slot, lastError: null })
+          .where(eq(briefingSettingsTable.id, 1));
+      }
+      return 0;
+    }
+
+    const messages = pending.flatMap((story) => {
+      const parts = splitHtmlMessage(
+        formatStoryMessage(story, breaking),
+        TELEGRAM_SAFE_LENGTH,
+      );
+      return parts.map((text, index) => ({
+        text,
+        storyId: story.id,
+        finalPart: index === parts.length - 1,
+      }));
+    });
+
+    for (const message of messages) {
+      summary.telegramAttempts += 1;
+      try {
+        await sendTelegramMessage(settings.telegramChatId, message.text, "HTML");
+        summary.telegramAccepted += 1;
+      } catch (error) {
+        summary.telegramFailures += 1;
+        throw error;
+      }
+      if (!message.finalPart) continue;
+      const deliveredAt = new Date();
+      await db
+        .update(briefingStoriesTable)
+        .set({ deliveredAt })
+        .where(
+          and(
+            inStoryIds([message.storyId]),
+            isNull(briefingStoriesTable.deliveredAt),
+          ),
+        );
+      summary.storiesMarkedDelivered += 1;
+      await db
+        .update(briefingSettingsTable)
+        .set({
+          ...(!breaking && !force
+            ? { lastSentAt: deliveredAt }
+            : {}),
+          lastError: null,
+        })
+        .where(eq(briefingSettingsTable.id, 1));
+    }
+
+    if (!breaking && !force && slot) {
+      await db
+        .update(briefingSettingsTable)
+        .set({ lastProcessedDigestSlotAt: slot })
+        .where(eq(briefingSettingsTable.id, 1));
+    }
+    return pending.length;
+  } finally {
+    try {
+      observe?.(summary);
+    } catch {
+      // Observability must never change the delivery result.
+    }
   }
-  return pending.length;
 }
 
 function inStoryIds(ids: number[]) {
@@ -432,25 +501,65 @@ async function schedulerTick(): Promise<void> {
 
   try {
     const settings = await ensureBriefingSettings();
-    if (!settings.telegramChatId || !settings.enabled) return;
+    const chatConfigured = Boolean(settings.telegramChatId);
+    const paused = !settings.enabled;
+    const now = new Date();
+    const hourlySlotDue = Boolean(digestSlot(now, settings.lastProcessedDigestSlotAt));
+    if (!chatConfigured || paused) {
+      logger.info(
+        {
+          paused,
+          chatConfigured,
+          refreshDue: false,
+          hourlySlotDue,
+          breaking: null,
+          hourly: null,
+        },
+        "Briefline scheduled pass summary",
+      );
+      return;
+    }
     const shouldRefresh =
       !settings.lastCheckedAt ||
       Date.now() - settings.lastCheckedAt.getTime() >= SOURCE_CHECK_INTERVAL_MS;
 
+    let refreshResult: Awaited<ReturnType<typeof refreshNews>> | null = null;
+    let refreshFailed = false;
     if (shouldRefresh) {
       try {
-        await refreshNews();
+        refreshResult = await refreshNews();
       } catch (error) {
+        refreshFailed = true;
         await recordSchedulerError(error, true);
       }
     }
 
+    const dispatchSummaries: DispatchSummary[] = [];
     try {
-      await dispatchPendingStories(false, true);
-      await dispatchPendingStories();
+      await dispatchPendingStories(false, true, (summary) => dispatchSummaries.push(summary));
+      await dispatchPendingStories(false, false, (summary) => dispatchSummaries.push(summary));
     } catch (error) {
       await recordSchedulerError(error);
     }
+    logger.info(
+      {
+        paused,
+        chatConfigured,
+        refreshDue: shouldRefresh,
+        refreshSucceeded: shouldRefresh ? !refreshFailed : null,
+        refresh: refreshResult
+          ? {
+              fetchedCandidates: refreshResult.fetched,
+              analysisAccepted: refreshResult.analyzed,
+              storiesInserted: refreshResult.newStories,
+            }
+          : null,
+        hourlySlotDue,
+        breaking: dispatchSummaries.find((summary) => summary.lane === "breaking") ?? null,
+        hourly: dispatchSummaries.find((summary) => summary.lane === "hourly") ?? null,
+      },
+      "Briefline scheduled pass summary",
+    );
   } finally {
     tickInProgress = false;
   }

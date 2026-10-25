@@ -136,7 +136,13 @@ export function fixture() {
     store: {
       ensureBriefingSettings: async () => ({ ...settings }),
     },
-    logger: { logger: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) } },
+    logger: {
+      logger: {
+        info: (...args) => warnings.push(args),
+        warn: (...args) => warnings.push(args),
+        error: (...args) => warnings.push(args),
+      },
+    },
   };
   return { settings, stories, feedHealth, sent, warnings, mocks };
 }

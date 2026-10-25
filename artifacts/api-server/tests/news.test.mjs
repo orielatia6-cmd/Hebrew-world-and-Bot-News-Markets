@@ -65,10 +65,28 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
   assert.equal(clientOptions[0].maxRetries, 2);
   assert.deepEqual(parserOptions[0].customFields.item, [["source", "source"]]);
   assert.equal(analysisRequests[0].model, "gpt-5-mini");
+  const editorialInstructions = analysisRequests[0].messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n");
+  assert.match(editorialInstructions, /אין מכסת ידיעות/u);
+  assert.match(editorialInstructions, /החזר 0–6 סיפורים מהותיים בלבד/u);
+  assert.match(editorialInstructions, /מנגנון ברור כמו עלות, ביקוש, היצע, רגולציה או ריבית/u);
+  assert.match(editorialInstructions, /תעתק שמות אנשים ומקומות כשמקובל/u);
   assert.equal(requests[0].length, 1);
   assert.equal(requests[0][0].source, "Reuters");
   assert.equal(f.stories[0].sourceName, "Reuters · תקציר RSS בלבד");
   assert.equal(f.stories[0].importance, 3, "below-threshold stories remain available for later settings changes");
+  const selectionLog = f.warnings.find((args) => args[1] === "Briefline news selection summary");
+  assert.ok(selectionLog, "the existing refresh should emit one compact selection summary");
+  assert.equal(selectionLog[0].feedsSucceeded, 11);
+  assert.equal(selectionLog[0].feedsFailed, 0);
+  assert.equal(selectionLog[0].feedCandidates, 22);
+  assert.equal(selectionLog[0].uniqueSourceCandidates, 1);
+  assert.equal(selectionLog[0].filtered.invalidTitleOrLink, 11);
+  assert.equal(selectionLog[0].filtered.missingInvalidOrOldPublicationDate, 11);
+  assert.equal(selectionLog[0].filtered.duplicateSource, 21);
+  assert.doesNotMatch(JSON.stringify(selectionLog), /OPENAI_API_KEY|https:\/\/|News again/u);
   assert.equal((await news.refreshNews()).newStories, 0);
   assert.equal(requests.length, 1, "seen stories must not incur another analysis call");
 });
@@ -300,6 +318,7 @@ test("an article body cut to fit the request budget is labeled partial without a
   assert.equal(articleReads, 1);
   assert.equal(aiCalls, 1);
   assert.ok(countChatInputTokens(requestMessages) <= testTokenLimit);
+  assert.ok(requestItems.length <= 12, "only the 12 highest-priority candidates are sent for analysis");
   assert.ok(
     requestItems.some((item) =>
       item.materialScope.startsWith("Partial article-body excerpt"),
@@ -521,6 +540,97 @@ test("professional Hebrew rejects source insertion and meta language, while keep
   assert.notEqual(parsed[0].whyItMatters, parsed[0].marketImpact);
 });
 
+test("three editorial examples accept concrete Hebrew and reject vague template language", async () => {
+  const f = fixture();
+  const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["parseAnalysis"] });
+  const examples = [
+    {
+      name: "earnings concentration",
+      candidate: {
+        sourceId: "earnings",
+        title: "S&P 500 profit growth depends on a handful of stocks, WSJ says",
+        articleContext: "A small group of companies accounts for much of earnings growth in the S&P 500.",
+        sourceName: "The Wall Street Journal",
+        priorReports: [],
+      },
+      before: {
+        title: "שיא הרווחים תלוי בכמה מניות בודדות, לפי WSJ",
+        summary: "דיווח הבום ברווחי החברות נשען באופן WSJ כבד על מספר מועט של מניות.",
+        whyItMatters: "הרחבת המימון הפעיל בתחום.",
+        marketImpact: "שינוי חשיפת הסקטור לסיכונים והזדמנויות מימון.",
+      },
+      after: {
+        title: "מספר חברות מוביל את צמיחת הרווחים במדד",
+        summary: "חלק ניכר מצמיחת הרווחים במדד מגיע ממספר מצומצם של חברות.",
+        whyItMatters: "הצמיחה ברווחי המדד נשענת על מעט חברות, ולא מתפזרת בין מרבית החברות.",
+        marketImpact: "אם החברות האלה יאכזבו, תחזית הרווח המצטברת של המדד עשויה להיחלש.",
+      },
+    },
+    {
+      name: "Federal Reserve decision",
+      candidate: {
+        sourceId: "fed",
+        title: "Federal Reserve holds rates at 5.25%",
+        articleContext: "The Federal Reserve held its rate at 5.25%.",
+        sourceName: "Reuters",
+        priorReports: [],
+      },
+      before: {
+        title: "הפד משאיר מימון פעיל",
+        summary: "הפד מסר עדכון בנושא הריבית.",
+        whyItMatters: "הדיווח מספק למשקיעים מידע חשוב על התחום.",
+        marketImpact: "ההחלטה עשויה להשפיע על השווקים.",
+      },
+      after: {
+        title: "הפדרל ריזרב הותיר את הריבית על 5.25%",
+        summary: "הבנק המרכזי הותיר את הריבית על 5.25%.",
+        whyItMatters: "ההחלטה משאירה את עלות האשראי הנוכחית לעסקים ולמשקי הבית.",
+        marketImpact: "",
+      },
+    },
+    {
+      name: "Trump semiconductor tariffs",
+      candidate: {
+        sourceId: "tariffs",
+        title: "Trump announces new tariffs on chip imports",
+        articleContext: "Trump announced new import tariffs on chips. The tariffs take effect next month.",
+        sourceName: "Reuters",
+        priorReports: [],
+      },
+      before: {
+        title: "טראמפ והסקטור מתמודדים עם מימון פעיל",
+        summary: "נמסר עדכון על מדיניות חדשה.",
+        whyItMatters: "ההתפתחות משנה את החשיפה לסיכונים והזדמנויות.",
+        marketImpact: "הדבר עשוי להשפיע על מניות הטכנולוגיה.",
+      },
+      after: {
+        title: "מכסים חדשים על יבוא שבבים ייכנסו לתוקף בחודש הבא",
+        summary: "טראמפ הודיע על מכסים חדשים על יבוא שבבים, שייכנסו לתוקף בחודש הבא.",
+        whyItMatters: "ההשפעה תלויה בשיעור המכס וברכיבים שייכללו, שיקבעו אילו חברות יישאו בעלות.",
+        marketImpact: "אם המכסים יחולו על רכיבים מרכזיים, עלויות הייצור של החברות המייבאות עלולות לעלות.",
+      },
+    },
+  ];
+
+  for (const example of examples) {
+    assert.deepEqual(
+      news.parseAnalysis({ stories: [{ sourceId: example.candidate.sourceId, ...example.before }] }, [example.candidate]),
+      [],
+      `${example.name}: vague or malformed draft should be rejected`,
+    );
+    const [accepted] = news.parseAnalysis(
+      { stories: [{ sourceId: example.candidate.sourceId, ...example.after }] },
+      [example.candidate],
+    );
+    assert.ok(accepted, `${example.name}: concrete edit should pass`);
+    assert.doesNotMatch(
+      `${accepted.title} ${accepted.summary} ${accepted.whyItMatters} ${accepted.marketImpact}`,
+      /הרחבת המימון הפעיל בתחום|שינוי חשיפת הסקטור|הכותרת מצביעה|הדיווח מראה|לפי WSJ/u,
+    );
+    assert.ok(accepted.whyItMatters.length > 20);
+  }
+});
+
 test("relevance ranking favors market-moving topics and reputable sources", async () => {
   const f = fixture();
   const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["candidatePriority"] });
@@ -539,9 +649,23 @@ test("relevance ranking favors market-moving topics and reputable sources", asyn
     ...priorityStory,
     sourceName: "Yahoo Finance — S&P 500",
   };
+  const routineCommentary = {
+    ...priorityStory,
+    title: "Analysts debate whether Nvidia stock is expensive after its rally",
+    articleContext: "Analysts discuss a possible valuation and price target for Nvidia.",
+  };
+  const materialDecision = {
+    ...priorityStory,
+    title: "Federal Reserve announces a new interest rate decision",
+    articleContext: "The FOMC announced a new policy decision.",
+  };
   assert.ok(news.candidatePriority(priorityStory) > news.candidatePriority(lowRelevanceStory));
   assert.ok(news.candidatePriority(priorityStory) > news.candidatePriority(yahooStory));
   assert.ok(news.candidatePriority(yahooStory) > news.candidatePriority(lowRelevanceStory));
+  assert.ok(
+    news.candidatePriority(materialDecision) > news.candidatePriority(routineCommentary),
+    "a concrete policy decision should rank above routine market commentary",
+  );
 });
 
 test("a previously reported event is suppressed unless the analysis marks a material update", async (t) => {

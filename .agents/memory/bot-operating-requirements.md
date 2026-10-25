@@ -26,3 +26,9 @@ Keep full-article context disabled unless a fixed input-token budget and its cos
 **Why:** The user wants article-based summaries without exceeding the existing authorized AI usage, and no prior hard input-token ceiling was established.
 
 **How to apply:** Preserve the opt-in default-off setting; do not enable it merely because a local token cap exists. Use concise paraphrases and never claim a complete read when the submitted body was clipped.
+
+For routine delivery diagnosis, derive concise, secret-free observability from results the scheduled run already has; do not add database queries, AI calls, or Telegram sends solely for diagnostics.
+
+**Why:** The user explicitly requires delivery troubleshooting to stay within the existing free/approved usage and avoid extra service calls.
+
+**How to apply:** Aggregate existing run counts and outcomes in memory, log only non-sensitive status and totals, and verify delivery only from actual Telegram send responses or existing records.

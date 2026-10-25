@@ -110,6 +110,50 @@ test("AI failure never sends malformed cached analysis, while acceptable stored 
   assert.ok(f.warnings.some((args) => JSON.stringify(args).includes("Skipped stored stories")));
 });
 
+test("scheduled pass logs pause, Israel slot, eligibility, and Telegram acceptance without IDs", async (t) => {
+  const { f, schedulerTick } = await schedulerFixture(t);
+  f.settings.lastCheckedAt = new Date("2026-07-01T05:00:00Z");
+  f.settings.lastProcessedDigestSlotAt = new Date("2026-07-01T04:00:00Z");
+  f.stories.push(story(1, 4));
+
+  await schedulerTick();
+  const logEntry = f.warnings.find(
+    (args) => args[1] === "Briefline scheduled pass summary",
+  );
+  assert.ok(logEntry, "one normal scheduler pass emits an aggregate summary");
+  const summary = logEntry[0];
+  assert.equal(summary.paused, false);
+  assert.equal(summary.chatConfigured, true);
+  assert.equal(summary.hourlySlotDue, true);
+  assert.equal(summary.refreshDue, false);
+  assert.equal(summary.breaking.eligibleStories, 0);
+  assert.equal(summary.breaking.telegramAttempts, 0);
+  assert.equal(summary.hourly.eligibleStories, 1);
+  assert.equal(summary.hourly.selectedStories, 1);
+  assert.equal(summary.hourly.telegramAttempts, 1);
+  assert.equal(summary.hourly.telegramAccepted, 1);
+  assert.equal(summary.hourly.telegramFailures, 0);
+  assert.equal(summary.hourly.storiesMarkedDelivered, 1);
+  assert.doesNotMatch(JSON.stringify(summary), /101|source-1|example\.test|כותרת/u);
+});
+
+test("dispatch observer counts a rejected Telegram send without treating it as delivery", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  f.stories.push(story(1, 4));
+  f.failSend = true;
+  let observed;
+
+  await assert.rejects(
+    dispatchPendingStories(true, false, (summary) => { observed = summary; }),
+    /Telegram unavailable/,
+  );
+  assert.equal(observed.telegramAttempts, 1);
+  assert.equal(observed.telegramAccepted, 0);
+  assert.equal(observed.telegramFailures, 1);
+  assert.equal(observed.storiesMarkedDelivered, 0);
+  assert.equal(f.stories[0].deliveredAt, null);
+});
+
 test("each story is one concise Hebrew message with factual sections and a clickable source", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   f.stories.push(
