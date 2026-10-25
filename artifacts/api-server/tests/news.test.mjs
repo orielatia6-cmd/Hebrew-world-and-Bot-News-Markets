@@ -60,10 +60,140 @@ test("feeds deduplicate URLs/fragments and persisted stories before paid analysi
   assert.equal(analysisRequests[0].model, "gpt-5-mini");
   assert.equal(requests[0].length, 1);
   assert.equal(requests[0][0].source, "Reuters");
-  assert.equal(f.stories[0].sourceName, "Reuters");
+  assert.equal(f.stories[0].sourceName, "Reuters · תקציר RSS בלבד");
   assert.equal(f.stories[0].importance, 3, "below-threshold stories remain available for later settings changes");
   assert.equal((await news.refreshNews()).newStories, 0);
   assert.equal(requests.length, 1, "seen stories must not incur another analysis call");
+});
+
+test("article-body context remains off by default and labels new summaries as RSS-only", async (t) => {
+  const f = fixture();
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousArticleFlag = process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED;
+  process.env.OPENAI_API_KEY = "fake-test-key";
+  delete process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED;
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+    if (previousArticleFlag === undefined) delete process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED;
+    else process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED = previousArticleFlag;
+  });
+
+  let articleReads = 0;
+  let aiCalls = 0;
+  let requestItems = [];
+  t.mock.method(globalThis, "fetch", async () => ({
+    ok: true,
+    text: async () => "fixture feed",
+  }));
+  f.mocks["article-reader"] = {
+    readPublicArticle: async () => {
+      articleReads += 1;
+      return { status: "article", text: "Unrequested article body", title: "A story", siteName: "BBC News", finalUrl: "https://www.bbc.com/news/story" };
+    },
+    fullArticleLimits: { maxFetchesPerRun: 1 },
+  };
+  const news = await load("lib/briefing/news.ts", {
+    ...f.mocks,
+    "rss-parser": { default: class {
+      async parseString() {
+        return { items: [{
+          title: "Company announces a production expansion",
+          link: "https://example.test/production-expansion",
+          isoDate: new Date().toISOString(),
+          source: "Reuters",
+          contentSnippet: "The company announced a production expansion after reporting stronger customer demand and describing how suppliers will support the additional manufacturing capacity.",
+        }] };
+      }
+    } },
+    openai: { default: class {
+      chat = { completions: { create: async (request) => {
+        aiCalls += 1;
+        requestItems = JSON.parse(request.messages.find((message) => message.role === "user").content);
+        return { choices: [{ message: { content: JSON.stringify({
+          stories: requestItems.map((item) => professionalStory(item.sourceId)),
+        }) } }] };
+      } } };
+    } },
+  });
+
+  const result = await news.refreshNews();
+  assert.equal(result.newStories, 1);
+  assert.equal(articleReads, 0, "default-off mode makes no article-page requests");
+  assert.equal(aiCalls, 1, "the existing single analysis call remains unchanged");
+  assert.equal(requestItems[0].materialScope, "RSS title and excerpt only; the full article was not fetched");
+  assert.match(f.stories[0].sourceName, /תקציר RSS בלבד/u);
+});
+
+test("opt-in article context is capped, paraphrase-only, and falls back to RSS for remaining stories", async (t) => {
+  const f = fixture();
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousArticleFlag = process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED;
+  process.env.OPENAI_API_KEY = "fake-test-key";
+  process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED = "true";
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+    if (previousArticleFlag === undefined) delete process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED;
+    else process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED = previousArticleFlag;
+  });
+
+  const articleReads = [];
+  let aiCalls = 0;
+  let requestItems = [];
+  t.mock.method(globalThis, "fetch", async () => ({
+    ok: true,
+    text: async () => "fixture feed",
+  }));
+  f.mocks["article-reader"] = {
+    readPublicArticle: async (url, title) => {
+      articleReads.push({ url, title });
+      return {
+        status: "article",
+        text: `FULL ARTICLE BODY: ${title}. ${"Verified article detail with context and reporting. ".repeat(20)}`,
+        title,
+        siteName: "BBC News",
+        finalUrl: url,
+      };
+    },
+    fullArticleLimits: { maxFetchesPerRun: 1 },
+  };
+  const news = await load("lib/briefing/news.ts", {
+    ...f.mocks,
+    "rss-parser": { default: class {
+      async parseString() {
+        return { items: [1, 2, 3].map((number) => ({
+          title: `Company announces production expansion ${number}`,
+          link: `https://example.test/production-expansion-${number}`,
+          isoDate: new Date().toISOString(),
+          source: "Reuters",
+          contentSnippet: `The company announced production expansion ${number} after reporting stronger customer demand and describing how suppliers will support the additional manufacturing capacity.`,
+        })) };
+      }
+    } },
+    openai: { default: class {
+      chat = { completions: { create: async (request) => {
+        aiCalls += 1;
+        requestItems = JSON.parse(request.messages.find((message) => message.role === "user").content);
+        assert.equal(request.model, "gpt-5-mini");
+        assert.equal(request.max_completion_tokens, 8192);
+        assert.match(request.messages[0].content, /פרפרזה קצרה בלבד/u);
+        assert.match(request.messages[0].content, /אל תתרגם או תשחזר את הכתבה כולה/u);
+        return { choices: [{ message: { content: JSON.stringify({
+          stories: requestItems.map((item) => professionalStory(item.sourceId)),
+        }) } }] };
+      } } };
+    } },
+  });
+
+  const result = await news.refreshNews();
+  assert.equal(result.newStories, 3);
+  assert.equal(articleReads.length, 1, "no more than one candidate page is fetched per refresh");
+  assert.equal(aiCalls, 1, "full text uses the existing analysis call");
+  assert.equal(requestItems.filter((item) => item.materialScope.startsWith("Full article")).length, 1);
+  assert.equal(requestItems.filter((item) => item.materialScope.startsWith("RSS title")).length, 2);
+  assert.ok(requestItems.some((item) => item.excerpt.startsWith("FULL ARTICLE BODY:")));
+  assert.equal(f.stories.filter((story) => story.sourceName.includes("תקציר RSS בלבד")).length, 2);
 });
 
 test("an OpenAI request timeout is identified as an analysis timeout without exposing credentials", async (t) => {

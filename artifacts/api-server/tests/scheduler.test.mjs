@@ -238,6 +238,21 @@ test("Google News aggregator links are labeled as aggregators, not direct publis
   );
 });
 
+test("RSS-only summaries retain an explicit basis label in source attribution", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  f.stories.push({
+    ...story(1, 5),
+    sourceName: "Google News — AI · תקציר RSS בלבד",
+    url: "https://news.google.com/rss/articles/example-id",
+  });
+
+  assert.equal(await dispatchPendingStories(), 1);
+  assert.match(
+    f.sent[0].text,
+    /מקור: Google News · תקציר RSS בלבד<\/a>/u,
+  );
+});
+
 test("market impact is omitted unless it is specific and relevant to the story", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   f.stories.push(

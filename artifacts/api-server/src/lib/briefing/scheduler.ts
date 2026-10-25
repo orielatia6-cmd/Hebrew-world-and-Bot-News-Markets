@@ -38,9 +38,15 @@ function escapeHtml(value: string): string {
 }
 
 function sourceLinkLabel(sourceName: string, sourceUrl: URL): string {
-  if (sourceUrl.hostname !== "news.google.com") return sourceName;
-  if (/google news/i.test(sourceName)) return "Google News";
-  return `${sourceName} · דרך Google News`;
+  const rssOnly = /תקציר RSS בלבד/u.test(sourceName);
+  const cleanName = sourceName.replace(/\s*·\s*תקציר RSS בלבד/u, "").trim();
+  let label = cleanName;
+  if (sourceUrl.hostname === "news.google.com") {
+    label = /google news/i.test(cleanName)
+      ? "Google News"
+      : `${cleanName} · דרך Google News`;
+  }
+  return rssOnly ? `${label} · תקציר RSS בלבד` : label;
 }
 
 function compactHeadline(title: string): string {
