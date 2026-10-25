@@ -2,7 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture, load } from "./harness.mjs";
 
-const { ANALYSIS_INPUT_TOKEN_LIMIT, countChatInputTokens } =
+const {
+  ANALYSIS_INPUT_TOKEN_LIMIT,
+  countChatInputTokens,
+  fitAnalysisPayload,
+} =
   await load("lib/briefing/prompt-budget.ts", {});
 
 function professionalStory(sourceId, overrides = {}) {
@@ -237,6 +241,7 @@ test("an article body cut to fit the request budget is labeled partial without a
     "US Treasury updates its borrowing estimate",
   ];
   const rssExcerpt = "The report describes company demand, supplier capacity and the relevant policy context. ".repeat(26).slice(0, 2_300);
+  const testTokenLimit = 3_500;
   let aiCalls = 0;
   let requestMessages = [];
   let requestItems = [];
@@ -261,6 +266,11 @@ test("an article body cut to fit the request budget is labeled partial without a
   };
   const news = await load("lib/briefing/news.ts", {
     ...f.mocks,
+    "prompt-budget": {
+      ANALYSIS_INPUT_TOKEN_LIMIT: testTokenLimit,
+      fitAnalysisPayload: (payload, systemContents) =>
+        fitAnalysisPayload(payload, systemContents, testTokenLimit),
+    },
     "rss-parser": { default: class {
       async parseString() {
         return {
@@ -289,7 +299,7 @@ test("an article body cut to fit the request budget is labeled partial without a
   await news.refreshNews();
   assert.equal(articleReads, 1);
   assert.equal(aiCalls, 1);
-  assert.ok(countChatInputTokens(requestMessages) <= ANALYSIS_INPUT_TOKEN_LIMIT);
+  assert.ok(countChatInputTokens(requestMessages) <= testTokenLimit);
   assert.ok(
     requestItems.some((item) =>
       item.materialScope.startsWith("Partial article-body excerpt"),
