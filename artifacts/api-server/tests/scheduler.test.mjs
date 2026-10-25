@@ -253,6 +253,18 @@ test("RSS-only summaries retain an explicit basis label in source attribution", 
   );
 });
 
+test("partial article-body summaries are labeled as partial at the source link", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  f.stories.push({
+    ...story(1, 5),
+    sourceName: "BBC News · גוף כתבה חלקי",
+    url: "https://www.bbc.co.uk/news/example",
+  });
+
+  assert.equal(await dispatchPendingStories(), 1);
+  assert.match(f.sent[0].text, /מקור: BBC News · גוף כתבה חלקי<\/a>/u);
+});
+
 test("market impact is omitted unless it is specific and relevant to the story", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   f.stories.push(

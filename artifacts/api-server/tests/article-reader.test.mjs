@@ -181,6 +181,9 @@ test("unrelated page titles and oversized article bodies fall back instead of be
 });
 
 test("article retrieval is explicitly opt-in", () => {
+  assert.equal(fullArticleLimits.maxFetchesPerRun, 1);
+  assert.equal(fullArticleLimits.maxHtmlBytes, 512 * 1024);
+  assert.equal(fullArticleLimits.maxTextChars, 8_000);
   const oldValue = process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED;
   delete process.env.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED;
   assert.equal(fullArticleContextEnabled(), false);
