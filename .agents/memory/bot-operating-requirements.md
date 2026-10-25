@@ -20,3 +20,9 @@ For development-only Telegram diagnostics, keep the test isolated and bounded ra
 **Why:** The user explicitly requested a temporary test without publishing or OpenAI usage and confirmed that the isolated welcome and test replies arrived without a login code.
 
 **How to apply:** Obtain authorization for a temporary session, retain the paid-hosting approval boundary, and stop the listener after verification. Successful temporary delivery does not establish production readiness or authorize continuous development polling.
+
+Keep full-article context disabled unless a fixed input-token budget and its cost implications have been explicitly approved. When enabled, article text must replace RSS excerpt text within that same budget; any truncated body must be labeled partial.
+
+**Why:** The user wants article-based summaries without exceeding the existing authorized AI usage, and no prior hard input-token ceiling was established.
+
+**How to apply:** Preserve the opt-in default-off setting; do not enable it merely because a local token cap exists. Use concise paraphrases and never claim a complete read when the submitted body was clipped.

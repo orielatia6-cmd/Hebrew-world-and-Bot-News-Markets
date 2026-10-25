@@ -8,11 +8,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Choose the scheduled bot or a database-only maintenance action"
+        description: "Choose the scheduled bot, a database-only maintenance action, or offline regression tests"
         required: true
         type: choice
         options:
           - scheduled
+          - regression-test
           - schema-check
           - delivery-audit
           - migration-preflight
@@ -33,6 +34,7 @@ concurrency:
 
 jobs:
   briefing:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode != 'regression-test' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -79,3 +81,21 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED: ${{ vars.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED || 'false' }}
+
+  regression-test:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'regression-test' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @workspace/api-server test
+      - run: pnpm --filter @workspace/api-server typecheck
+      - run: pnpm --filter @workspace/api-server build
