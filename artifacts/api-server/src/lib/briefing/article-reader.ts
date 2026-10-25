@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { createHash } from "node:crypto";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 
@@ -16,7 +17,13 @@ const MAX_ARTICLE_TEXT_CHARS = 8_000;
 const MIN_ARTICLE_TEXT_CHARS = 600;
 const REQUEST_TIMEOUT_MS = 4_000;
 const MAX_REDIRECTS = 3;
+const ARTICLE_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
+const ARTICLE_CACHE_MAX_ENTRIES = 16;
 const USER_AGENT = "BrieflineNews/1.0 (+https://replit.com)";
+const articleCache = new Map<
+  string,
+  { expiresAt: number; result: Extract<ArticleReadResult, { status: "article" }> }
+>();
 
 export type ArticleReadResult =
   | {
@@ -284,6 +291,15 @@ export async function readPublicArticle(
     return { status: "not-allowed", reason: "publisher-or-url-not-allowed" };
   }
 
+  const cacheKey = createHash("sha256")
+    .update(`${initialUrl.href}\n${expectedTitle.trim().toLocaleLowerCase("he")}`)
+    .digest("hex");
+  const cached = articleCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { ...cached.result };
+  }
+  if (cached) articleCache.delete(cacheKey);
+
   const fetchImpl = options.fetchImpl ?? fetch;
   const robotsCache = options.robotsCache ?? new Map<string, Promise<boolean>>();
   let currentUrl = initialUrl;
@@ -381,7 +397,7 @@ export async function readPublicArticle(
         return { status: "insufficient", reason: "article-body-too-short" };
       }
 
-      return {
+      const result = {
         status: "article",
         text,
         title: articleTitle,
@@ -390,7 +406,20 @@ export async function readPublicArticle(
           document.querySelector('meta[property="og:site_name"]')?.getAttribute("content")?.trim() ||
           null,
         finalUrl: currentUrl.toString(),
-      };
+      } as const;
+      for (const [key, value] of articleCache) {
+        if (value.expiresAt <= Date.now()) articleCache.delete(key);
+      }
+      while (articleCache.size >= ARTICLE_CACHE_MAX_ENTRIES) {
+        const oldestKey = articleCache.keys().next().value;
+        if (!oldestKey) break;
+        articleCache.delete(oldestKey);
+      }
+      articleCache.set(cacheKey, {
+        expiresAt: Date.now() + ARTICLE_CACHE_TTL_MS,
+        result,
+      });
+      return { ...result };
     } catch {
       return { status: "unavailable", reason: "html-parse-failed" };
     } finally {
@@ -410,4 +439,6 @@ export const fullArticleLimits = {
   maxHtmlBytes: MAX_HTML_BYTES,
   maxTextChars: MAX_ARTICLE_TEXT_CHARS,
   requestTimeoutMs: REQUEST_TIMEOUT_MS,
+  cacheTtlMs: ARTICLE_CACHE_TTL_MS,
+  cacheMaxEntries: ARTICLE_CACHE_MAX_ENTRIES,
 } as const;

@@ -63,6 +63,33 @@ test("extracts a matching public article body and removes navigation/advertising
   assert.deepEqual(calls, ["/robots.txt", "/news/business-123"]);
 });
 
+test("a successfully extracted public article is reused from the bounded process cache", async () => {
+  const calls = [];
+  const url = "https://www.bbc.com/news/business-cache-fixture";
+  const fetchImpl = async (input) => {
+    const parsed = new URL(input);
+    calls.push(parsed.pathname);
+    if (parsed.pathname === "/robots.txt") return allowedRobots();
+    return new Response(articleHtml(), {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+  };
+
+  const first = await readPublicArticle(url, articleTitle, { fetchImpl });
+  const second = await readPublicArticle(url, articleTitle, {
+    fetchImpl: async () => {
+      throw new Error("cached article should not make another request");
+    },
+  });
+
+  assert.equal(first.status, "article");
+  assert.deepEqual(second, first);
+  assert.deepEqual(calls, ["/robots.txt", "/news/business-cache-fixture"]);
+  assert.equal(fullArticleLimits.cacheTtlMs, 6 * 60 * 60 * 1_000);
+  assert.equal(fullArticleLimits.cacheMaxEntries, 16);
+});
+
 test("blocked HTTP responses are not retried or bypassed", async () => {
   const calls = [];
   const result = await readPublicArticle(

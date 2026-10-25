@@ -631,6 +631,90 @@ test("three editorial examples accept concrete Hebrew and reject vague template 
   }
 });
 
+test("acquisition roles must agree across source headline, source text, and Hebrew copy", async () => {
+  const f = fixture();
+  const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["parseAnalysis"] });
+  const candidate = {
+    sourceId: "acquisition",
+    title: "Meta to acquire Sundial in stock deal",
+    articleContext: "Meta agreed to acquire Sundial. The deal remains subject to review.",
+    sourceName: "Reuters",
+    priorReports: [],
+  };
+  const accurate = {
+    sourceId: "acquisition",
+    title: "מטא תרכוש את סנדיאל בעסקה",
+    summary: "מטא הודיעה כי תרכוש את סנדיאל בעסקה.",
+    whyItMatters: "השלמת העסקה תעביר את השליטה בסנדיאל למטא.",
+    marketImpact: "",
+    importance: 3,
+    sentiment: "neutral",
+    tickers: [],
+  };
+  assert.equal(news.parseAnalysis({ stories: [accurate] }, [candidate]).length, 1);
+
+  const reversed = {
+    ...accurate,
+    title: "סנדיאל תרכוש את מטא בעסקה",
+    summary: "סנדיאל הודיעה כי תרכוש את מטא בעסקה.",
+    whyItMatters: "השלמת העסקה תעביר את השליטה במטא לסנדיאל.",
+  };
+  assert.deepEqual(news.parseAnalysis({ stories: [reversed] }, [candidate]), []);
+
+  const contradictorySource = {
+    ...candidate,
+    articleContext: "Sundial agreed to acquire Meta. The deal remains subject to review.",
+  };
+  assert.deepEqual(
+    news.parseAnalysis({ stories: [accurate] }, [contradictorySource]),
+    [],
+    "conflicting source title and article text must be withheld",
+  );
+});
+
+test("analysis cannot mix a company absent from its source or publish literal share-class Hebrew", async () => {
+  const f = fixture();
+  const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["parseAnalysis"] });
+  const candidate = {
+    sourceId: "meta",
+    title: "Meta announces a new share class",
+    articleContext: "Meta announced a new class of shares without voting rights.",
+    sourceName: "AP",
+    priorReports: [],
+  };
+  const base = {
+    sourceId: "meta",
+    title: "מטא מציגה סוג מניות ללא זכות הצבעה",
+    summary: "מטא הודיעה על סוג מניות חדש ללא זכות הצבעה.",
+    whyItMatters: "המהלך יאפשר למטא לגייס הון בלי להוסיף זכויות הצבעה.",
+    marketImpact: "",
+    importance: 3,
+    sentiment: "neutral",
+    tickers: [],
+  };
+  assert.equal(news.parseAnalysis({ stories: [base] }, [candidate]).length, 1);
+  assert.deepEqual(
+    news.parseAnalysis({
+      stories: [{
+        ...base,
+        title: "מטא מציגה כיתה חדשה של מניות",
+        summary: "מטא הודיעה על כיתה חדשה של מניות ללא זכות הצבעה.",
+      }],
+    }, [candidate]),
+    [],
+  );
+  assert.deepEqual(
+    news.parseAnalysis({
+      stories: [{
+        ...base,
+        summary: "טסלה הודיעה על סוג מניות חדש ללא זכות הצבעה.",
+      }],
+    }, [candidate]),
+    [],
+    "a company not present in the source cannot be substituted into the story",
+  );
+});
+
 test("relevance ranking favors market-moving topics and reputable sources", async () => {
   const f = fixture();
   const news = await load("lib/briefing/news.ts", f.mocks, { "news.ts": ["candidatePriority"] });
