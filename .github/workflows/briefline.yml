@@ -81,6 +81,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED: ${{ vars.BRIEFING_FULL_ARTICLE_CONTEXT_ENABLED || 'false' }}
+          TELEGRAM_CHANNEL_CHAT_ID: ${{ vars.TELEGRAM_CHANNEL_CHAT_ID || '' }}
 
   regression-test:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'regression-test' }}

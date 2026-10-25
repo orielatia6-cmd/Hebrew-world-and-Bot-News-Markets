@@ -18,6 +18,18 @@ const TELEGRAM_SAFE_LENGTH = 3_800;
 let schedulerStarted = false;
 let tickInProgress = false;
 
+function deliveryRecipients(configuredChatId: string | null | undefined): string[] {
+  const channelChatId = process.env.TELEGRAM_CHANNEL_CHAT_ID?.trim();
+  if (channelChatId && !/^-100\d+$/.test(channelChatId)) {
+    throw new Error("TELEGRAM_CHANNEL_CHAT_ID is not a valid channel ID.");
+  }
+
+  const recipients = [configuredChatId?.trim(), channelChatId].filter(
+    (chatId): chatId is string => Boolean(chatId),
+  );
+  return [...new Set(recipients)];
+}
+
 function sourceTrustRank(sourceName: string): number {
   return /\breuters\b|\bassociated press\b|\bbbc\b|\bbloomberg\b|\bfinancial times\b|\bwall street journal\b|\bfederal reserve\b|\bsec\b/i.test(
     sourceName,
@@ -336,13 +348,14 @@ async function dispatchPendingStories(
   };
   try {
     const settings = await ensureBriefingSettings();
+    const recipients = deliveryRecipients(settings.telegramChatId);
     summary.paused = !settings.enabled;
-    summary.chatConfigured = Boolean(settings.telegramChatId);
+    summary.chatConfigured = recipients.length > 0;
     if (!settings.enabled) {
       summary.skipReason = "paused";
       return 0;
     }
-    if (!settings.telegramChatId) {
+    if (recipients.length === 0) {
       summary.skipReason = "chat_unconfigured";
       return 0;
     }
@@ -416,13 +429,15 @@ async function dispatchPendingStories(
     });
 
     for (const message of messages) {
-      summary.telegramAttempts += 1;
-      try {
-        await sendTelegramMessage(settings.telegramChatId, message.text, "HTML");
-        summary.telegramAccepted += 1;
-      } catch (error) {
-        summary.telegramFailures += 1;
-        throw error;
+      for (const recipient of recipients) {
+        summary.telegramAttempts += 1;
+        try {
+          await sendTelegramMessage(recipient, message.text, "HTML");
+          summary.telegramAccepted += 1;
+        } catch (error) {
+          summary.telegramFailures += 1;
+          throw error;
+        }
       }
       if (!message.finalPart) continue;
       const deliveredAt = new Date();

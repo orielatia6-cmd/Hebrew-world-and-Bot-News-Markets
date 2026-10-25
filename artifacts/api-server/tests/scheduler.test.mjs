@@ -80,6 +80,57 @@ test("scheduled slot waits for its boundary after the prior slot; only recent el
   assert.equal(await dispatchPendingStories(), 0);
 });
 
+test("scheduled stories go to the existing chat and channel once, without overwriting the existing recipient", async (t) => {
+  const previousChannel = process.env.TELEGRAM_CHANNEL_CHAT_ID;
+  process.env.TELEGRAM_CHANNEL_CHAT_ID = "-1004434646599";
+  t.after(() => {
+    if (previousChannel === undefined) delete process.env.TELEGRAM_CHANNEL_CHAT_ID;
+    else process.env.TELEGRAM_CHANNEL_CHAT_ID = previousChannel;
+  });
+
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  const existingRecipient = f.settings.telegramChatId;
+  f.stories.push(story(1, 4));
+
+  assert.equal(await dispatchPendingStories(), 1);
+  assert.deepEqual(
+    f.sent.map(({ chatId }) => chatId),
+    [existingRecipient, "-1004434646599"],
+  );
+  assert.equal(f.settings.telegramChatId, existingRecipient);
+  assert.ok(f.stories[0].deliveredAt instanceof Date);
+});
+
+test("the channel can be the sole scheduled recipient", async (t) => {
+  const previousChannel = process.env.TELEGRAM_CHANNEL_CHAT_ID;
+  process.env.TELEGRAM_CHANNEL_CHAT_ID = "-1004434646599";
+  t.after(() => {
+    if (previousChannel === undefined) delete process.env.TELEGRAM_CHANNEL_CHAT_ID;
+    else process.env.TELEGRAM_CHANNEL_CHAT_ID = previousChannel;
+  });
+
+  const channelOnly = await schedulerFixture(t);
+  channelOnly.f.settings.telegramChatId = null;
+  channelOnly.f.stories.push(story(1, 4));
+  assert.equal(await channelOnly.dispatchPendingStories(), 1);
+  assert.deepEqual(channelOnly.f.sent.map(({ chatId }) => chatId), ["-1004434646599"]);
+});
+
+test("duplicate recipient IDs are deduplicated", async (t) => {
+  const previousChannel = process.env.TELEGRAM_CHANNEL_CHAT_ID;
+  process.env.TELEGRAM_CHANNEL_CHAT_ID = "-1004434646599";
+  t.after(() => {
+    if (previousChannel === undefined) delete process.env.TELEGRAM_CHANNEL_CHAT_ID;
+    else process.env.TELEGRAM_CHANNEL_CHAT_ID = previousChannel;
+  });
+
+  const duplicateTarget = await schedulerFixture(t);
+  duplicateTarget.f.settings.telegramChatId = "-1004434646599";
+  duplicateTarget.f.stories.push(story(2, 4));
+  assert.equal(await duplicateTarget.dispatchPendingStories(), 1);
+  assert.deepEqual(duplicateTarget.f.sent.map(({ chatId }) => chatId), ["-1004434646599"]);
+});
+
 test("AI failure never sends malformed cached analysis, while acceptable stored news can still deliver", async (t) => {
   const { f, schedulerTick } = await schedulerFixture(
     t,
