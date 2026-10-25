@@ -2,18 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./harness.mjs";
 
-const diagnostics = await load(
-  "lib/briefing/diagnostics.ts",
-  {},
-  {
-    "diagnostics.ts": [
-      "inspectBriefingSchema",
-      "requiredBriefingColumns",
-      "requiredBriefingIndexes",
-      "safeErrorSummary",
-    ],
-  },
-);
+const diagnostics = await load("lib/briefing/diagnostics.ts", {});
 
 test("read-only schema inspection checks only required metadata", async () => {
   const calls = [];
