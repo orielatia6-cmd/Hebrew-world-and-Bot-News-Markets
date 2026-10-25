@@ -47,6 +47,13 @@ function compactHeadline(title: string): string {
   return words.length <= 12 ? words.join(" ") : `${words.slice(0, 11).join(" ")}…`;
 }
 
+function categoryEmoji(category: string): string {
+  if (category === "world") return "🌍";
+  if (category === "trump") return "🇺🇸";
+  if (category === "markets") return "📊";
+  return "🗞️";
+}
+
 function comparisonText(text: string): string {
   return text
     .toLocaleLowerCase("he")
@@ -69,8 +76,44 @@ function ensureSentenceEnd(text: string): string {
   return /[.!?…]$/u.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
+function conciseSentences(text: string, maximum: number): string {
+  const trimmed = text.trim();
+  // Older stored analyses may be abnormally long. Keep all their content and
+  // let the safe Telegram splitter divide it instead of silently truncating.
+  if (trimmed.length > 1_200) return trimmed;
+  const sentences = trimmed.split(/(?<=[.!?…])\s+/u).filter(Boolean);
+  return sentences.slice(0, maximum).join(" ").trim();
+}
+
+function hasMarketRelevance(
+  story: typeof briefingStoriesTable.$inferSelect,
+  summary: string,
+  whyItMatters: string,
+  marketImpact: string,
+): boolean {
+  if (story.category === "markets" || story.tickers.length > 0) return true;
+  const evidence = `${story.title} ${summary} ${whyItMatters} ${marketImpact}`;
+  return /שוק|שווקים|מניות|מדד|בורסה|תשואות|אג["״']?ח|ריבית|פד|פדרל ריזרב|אינפלציה|מכסים|דולר|נפט|נאסד["״]?ק|נאסדק|s&p|nasdaq|fed|tariff|nvidia|tesla|semiconductor|שבבים|בינה מלאכותית|ai\b/i.test(
+    evidence,
+  );
+}
+
+function hasSpecificMarketImpact(text: string, tickers: string[]): boolean {
+  const normalized = comparisonText(text);
+  if (normalized.length < 12) return false;
+  if (
+    /^(?:אין קשר(?: ישיר)? לשוק|אין השפעה(?: ישירה)? על השוק|לא צפויה השפעה(?: ישירה)?|אין די מידע להעריך|לא ניתן להעריך את ההשפעה|ההשפעה אינה ברורה)|באופן כללי|ללא פרטים נוספים|תלויה בפרטים נוספים$/.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+  return tickers.length > 0 || /מניות|מדדי|מדד|s&p|nasdaq|נאסד|אג["״']?ח|תשואות|ריבית|ציפיות הריבית|דולר|נפט|מחירי|שבבים|מגזר|סקטור|טכנולוגיה|אשראי|מימון|equities|stocks|yields|rates|bonds|semiconductor|sector|index/i.test(text);
+}
+
 function formatStoryMessage(
   story: typeof briefingStoriesTable.$inferSelect,
+  breaking = false,
 ): string {
   let sourceUrl: URL;
   try {
@@ -82,9 +125,19 @@ function formatStoryMessage(
     throw new Error(`Story ${story.id} has an unsupported source URL protocol.`);
   }
 
-  const summary = removeHeadlineEcho(story.title, story.summary);
-  const whyItMatters = ensureSentenceEnd(story.whyItMatters);
-  const marketImpact = ensureSentenceEnd(story.marketImpact);
+  const summaryText = conciseSentences(
+    removeHeadlineEcho(story.title, story.summary),
+    2,
+  );
+  const summary = summaryText ? ensureSentenceEnd(summaryText) : "";
+  const whyItMatters = ensureSentenceEnd(conciseSentences(story.whyItMatters, 1));
+  const marketImpactText = conciseSentences(story.marketImpact, 1);
+  const showMarketImpact =
+    hasMarketRelevance(story, summary, whyItMatters, marketImpactText) &&
+    hasSpecificMarketImpact(marketImpactText, story.tickers);
+  const marketImpact = showMarketImpact
+    ? ensureSentenceEnd(marketImpactText)
+    : "";
   const analysisText = `${whyItMatters} ${marketImpact}`.toUpperCase();
   const additionalTickers = story.tickers.filter(
     (ticker) => !analysisText.includes(ticker.toUpperCase()),
@@ -94,10 +147,13 @@ function formatStoryMessage(
     : "";
 
   return [
-    `<b>${escapeHtml(compactHeadline(story.title))}</b>`,
+    breaking ? "🚨 <b>עדכון דחוף</b>" : "",
+    `<b>${categoryEmoji(story.category)} ${escapeHtml(compactHeadline(story.title))}</b>`,
     summary ? `📰 <b>מה קרה:</b>\n${escapeHtml(summary)}` : "",
     `🧠 <b>למה זה חשוב:</b>\n${escapeHtml(whyItMatters)}`,
-    `📈 <b>השפעה אפשרית:</b>\n${escapeHtml(marketImpact)}${tickerText}`,
+    showMarketImpact
+      ? `📈 <b>השפעה אפשרית:</b>\n${escapeHtml(marketImpact)}${tickerText}`
+      : "",
     `🔗 <a href="${escapeHtml(sourceUrl.toString())}">מקור: ${escapeHtml(sourceLinkLabel(story.sourceName, sourceUrl))}</a>`,
   ].filter(Boolean).join("\n\n");
 }
@@ -290,7 +346,10 @@ async function dispatchPendingStories(force = false, breaking = false): Promise<
   }
 
   const messages = pending.flatMap((story) => {
-    const parts = splitHtmlMessage(formatStoryMessage(story), TELEGRAM_SAFE_LENGTH);
+    const parts = splitHtmlMessage(
+      formatStoryMessage(story, breaking),
+      TELEGRAM_SAFE_LENGTH,
+    );
     return parts.map((text, index) => ({
       text,
       storyId: story.id,

@@ -37,8 +37,18 @@ test("scheduled slot waits for its boundary after the prior slot; only recent el
   f.settings.lastProcessedDigestSlotAt = new Date("2026-07-01T04:00:00Z");
   f.stories.push(
     story(1, 3),
-    { ...story(2, 4), title: "כותרת 2" },
-    { ...story(3, 5), title: "כותרת 3" },
+    {
+      ...story(2, 4),
+      category: "markets",
+      title: "כותרת 2",
+      marketImpact: "הדיווח עשוי להשפיע על מדדי המניות בארצות הברית.",
+    },
+    {
+      ...story(3, 5),
+      category: "markets",
+      title: "כותרת 3",
+      marketImpact: "הדיווח עשוי להשפיע על מדדי המניות בארצות הברית.",
+    },
     { ...story(4, 5), deliveredAt: new Date() },
   );
   f.stories.push({ ...story(5, 5), publishedAt: new Date("2026-06-28T04:00:00Z") });
@@ -75,7 +85,7 @@ test("each story is one concise Hebrew message with factual sections and a click
       title: "כותרת <שוק> & בדיקה",
       summary: "המקור מתאר התפתחות בשוק. בדיווח מופיעים פרטים נוספים.",
       whyItMatters: "ההתפתחות עשויה להשפיע על ציפיות המשקיעים.",
-      marketImpact: "ההשפעה על מניות השבבים תלויה בפרטים נוספים.",
+      marketImpact: "מניות השבבים עשויות להגיב בהתאם לפרטי ההודעה.",
       sentiment: "positive",
       tickers: ["NVDA"],
       sourceName: "Reuters & Desk",
@@ -103,7 +113,7 @@ test("each story is one concise Hebrew message with factual sections and a click
   assert.equal(nonfinancialMessage.parseMode, "HTML");
   assert.doesNotMatch(financialMessage.text, /🕒|שעון ישראל|תדרוכים/);
   assert.doesNotMatch(financialMessage.text, /\n{3,}/);
-  for (const emoji of ["📰", "🧠", "📈", "🔗"]) {
+  for (const emoji of ["📊", "📰", "🧠", "📈", "🔗"]) {
     assert.equal((financialMessage.text.match(new RegExp(emoji, "gu")) ?? []).length, 1);
   }
   assert.doesNotMatch(financialMessage.text, /🔴/u);
@@ -127,8 +137,9 @@ test("each story is one concise Hebrew message with factual sections and a click
     financialMessage.text,
     /🔗 <a href="https:\/\/example\.test\/article\?one=1&amp;two=2">מקור: Reuters &amp; Desk<\/a>/,
   );
-  assert.match(nonfinancialMessage.text, /השפעה אפשרית/);
-  assert.match(nonfinancialMessage.text, /אין קשר ישיר לשוק על סמך המידע הזמין/);
+  assert.match(financialMessage.text, /<b>📊 כותרת/);
+  assert.match(nonfinancialMessage.text, /<b>🌍 התפתחות אזרחית/);
+  assert.doesNotMatch(nonfinancialMessage.text, /השפעה אפשרית|אין קשר ישיר לשוק/);
   assert.doesNotMatch(financialMessage.text, /המלצה|קנייה|מכירה/);
 });
 
@@ -166,6 +177,65 @@ test("Google News aggregator links are labeled as aggregators, not direct publis
     f.sent[0].text,
     /🔗 <a href="https:\/\/news\.google\.com\/rss\/articles\/example-id">מקור: Reuters · דרך Google News<\/a>/,
   );
+});
+
+test("market impact is omitted unless it is specific and relevant to the story", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  f.stories.push(
+    {
+      ...story(1, 5),
+      category: "world",
+      title: "העיר פתחה מרכז חירום חדש",
+      summary: "הרשות המקומית פתחה מרכז חירום לתושבים. השירות יפעל מסביב לשעון.",
+      whyItMatters: "המרכז יספק מענה מהיר לתושבים בעת חירום.",
+      marketImpact: "הדבר עשוי להשפיע על השווקים באופן כללי.",
+    },
+    {
+      ...story(2, 5),
+      category: "trump",
+      title: "טראמפ הודיע על מכסים חדשים",
+      summary: "טראמפ הודיע על מכסים חדשים על יבוא שבבים. ההחלטה תיכנס לתוקף בחודש הבא.",
+      whyItMatters: "המכסים עשויים לשנות את עלויות היבוא של יצרניות שבבים.",
+      marketImpact: "מניות השבבים עלולות להיפגע אם העלויות יעלו.",
+      tickers: ["NVDA"],
+    },
+    {
+      ...story(3, 5),
+      category: "markets",
+      title: "הפד פרסם הודעה",
+      summary: "הבנק המרכזי פרסם הודעה לאחר ישיבתו. הוא לא שינה את הריבית.",
+      whyItMatters: "ההודעה מספקת למשקיעים מידע על עמדת הבנק.",
+      marketImpact: "ההודעה עשויה להשפיע על השוק.",
+    },
+  );
+
+  assert.equal(await dispatchPendingStories(), 3);
+  const unrelated = f.sent.find(({ text }) => text.includes("מרכז חירום"));
+  const trump = f.sent.find(({ text }) => text.includes("טראמפ הודיע"));
+  const boilerplateMarket = f.sent.find(({ text }) => text.includes("הפד פרסם"));
+  assert.ok(unrelated && trump && boilerplateMarket);
+  assert.doesNotMatch(unrelated.text, /📈 <b>השפעה אפשרית/);
+  assert.match(trump.text, /📈 <b>השפעה אפשרית/);
+  assert.doesNotMatch(boilerplateMarket.text, /📈 <b>השפעה אפשרית/);
+});
+
+test("urgent alerts use the same concise layout but are clearly separated from hourly digests", async (t) => {
+  const { f, dispatchPendingStories } = await schedulerFixture(t);
+  f.stories.push({
+    ...story(1, 5),
+    category: "markets",
+    title: "הפד הודיע על שינוי בריבית",
+    summary: "הפד הוריד את הריבית. ההחלטה פורסמה לאחר ישיבה מיוחדת.",
+    whyItMatters: "ההחלטה משנה את עלות האשראי במשק.",
+    marketImpact: "המדדים עשויים לעלות אם ההחלטה תומכת בצמיחה.",
+  });
+
+  assert.equal(await dispatchPendingStories(false, true), 1);
+  assert.match(f.sent[0].text, /^🚨 <b>עדכון דחוף<\/b>\n\n<b>📊 /);
+  for (const section of ["📰 <b>מה קרה:</b>", "🧠 <b>למה זה חשוב:</b>", "📈 <b>השפעה אפשרית:</b>", "🔗 <a href="]) {
+    assert.ok(f.sent[0].text.includes(section), `urgent message must include ${section}`);
+  }
+  assert.doesNotMatch(f.sent[0].text, /🕒|שעון ישראל/);
 });
 
 test("paused or unpaired delivery does not consume stories; resume delivers", async (t) => {
@@ -235,7 +305,7 @@ test("oversized stories split into valid HTML messages without losing text", asy
   for (let index = 0; index < 500; index += 1) {
     assert.ok(allText.includes(`פרט${index}.`), `missing source text token ${index}`);
   }
-  assert.ok(allText.includes("<b>כותרת בדיקה קצרה</b>"));
+  assert.ok(allText.includes("<b>🌍 כותרת בדיקה קצרה</b>"));
   assert.ok(f.stories[0].deliveredAt instanceof Date);
 });
 
@@ -258,11 +328,20 @@ test("a failed multipart send leaves the story pending until every part is deliv
 test("breaking alerts can send overnight without consuming the next scheduled slot or repeating stories", async (t) => {
   const { f, dispatchPendingStories } = await schedulerFixture(t);
   t.mock.timers.setTime(Date.parse("2026-07-01T22:00:00Z")); // 01:00 Israel
-  f.stories.push(story(1, 5), story(2, 4), { ...story(3, 5), publishedAt: new Date(Date.now() - 3 * 60 * 60_000) });
+  f.stories.push(
+    {
+      ...story(1, 5),
+      category: "markets",
+      marketImpact: "המדדים עשויים להגיב בהתאם לפרטי ההחלטה.",
+    },
+    story(2, 4),
+    { ...story(3, 5), publishedAt: new Date(Date.now() - 3 * 60 * 60_000) },
+  );
   assert.equal(await dispatchPendingStories(false, true), 1);
   assert.equal(f.settings.lastSentAt, null);
-  assert.match(f.sent[0].text, /מה קרה/);
-  assert.match(f.sent[0].text, /השפעה אפשרית/);
+  assert.match(f.sent[0].text, /^🚨 <b>עדכון דחוף<\/b>/);
+  assert.match(f.sent[0].text, /📰 <b>מה קרה:/);
+  assert.match(f.sent[0].text, /📈 <b>השפעה אפשרית:/);
   assert.equal(await dispatchPendingStories(false, true), 0);
   assert.equal(f.sent.length, 1);
   assert.equal(f.stories[1].deliveredAt, null);

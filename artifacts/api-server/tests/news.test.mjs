@@ -309,6 +309,11 @@ test("analysis rejects foreign IDs/non-Hebrew text and normalizes importance and
   const valid = { sourceId: "known", title: "כותרת", summary: "הדיווח מתאר את האירוע. פרטים נוספים מופיעים במקור.", whyItMatters: "חשוב", marketImpact: "השפעה" };
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, sourceId: "unknown" }] }, candidates), []);
   assert.deepEqual(news.parseAnalysis({ stories: [{ ...valid, summary: "English only" }] }, candidates), []);
+  assert.equal(
+    news.parseAnalysis({ stories: [{ ...valid, marketImpact: "" }] }, candidates).length,
+    1,
+    "a story without a supported market impact remains valid and may omit that section",
+  );
   assert.deepEqual(
     news.parseAnalysis({ stories: [{ ...valid, summary: "משפט עובדתי יחיד." }] }, candidates),
     [],
